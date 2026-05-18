@@ -2,13 +2,15 @@
 
 import { useState, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { Zap, Minus, Plus, ShoppingCart, Package, TrendingUp } from "lucide-react"
+import { Zap, Minus, Plus, ShoppingCart, Package, TrendingUp, Lock, ShieldCheck, Mail, Phone, MessageCircleMore } from "lucide-react"
 import { toast } from "sonner"
-import { useLocale, useAuth, useCart } from "@/lib/context"
+import { useLocale, useCart } from "@/lib/context"
+import { formatPaymentSettlementPrice, formatStorefrontPrice } from "@/lib/storefront-currency"
 import { orderApi, withMockFallback, getApiErrorMessage, setTurnstileHeaders } from "@/services/api"
 import { mockCreateOrder } from "@/lib/mock-data"
+import { ContactPanel } from "@/components/shared/contact-panel"
 import { Turnstile, useTurnstile } from "@/components/shared/turnstile"
-import { cn, validateEmail, generateIdempotencyKey, getCurrencySymbol, detectPaymentDevice, isMobileDevice } from "@/lib/utils"
+import { cn, validateEmail, generateIdempotencyKey, detectPaymentDevice, isMobileDevice } from "@/lib/utils"
 import { PaymentSelector } from "@/components/shared/payment-selector"
 import type { ProductDetail, ProductSpec, PaymentChannelItem } from "@/types"
 
@@ -18,20 +20,28 @@ interface ProductActionsProps {
 }
 
 export function ProductActions({ product, channels }: ProductActionsProps) {
-  const { t } = useLocale()
-  const { isLoggedIn } = useAuth()
+  const { t, locale } = useLocale()
   const { addItem } = useCart()
   const router = useRouter()
   const emailInputRef = useRef<HTMLInputElement>(null)
+  const backupEmailInputRef = useRef<HTMLInputElement>(null)
 
-  const enabledChannels = useMemo(() => channels.filter(c => c.is_enabled), [channels])
+  const enabledChannels = useMemo(
+    () => channels.filter(c => c.is_enabled),
+    [channels]
+  )
 
   const [selectedSpec, setSelectedSpec] = useState<ProductSpec | null>(
     product.specs?.[0] || null
   )
-  const [quantity, setQuantity] = useState(1)
-  const [email, setEmail] = useState("")
-  const [emailError, setEmailError] = useState("")
+  const contactType = product.contact_type || "EMAIL"
+  const requiresQueryPassword = product.query_password_enabled !== false
+  const minQuantity = Math.max(1, product.minimum_purchase_quantity || 1)
+  const [quantity, setQuantity] = useState(minQuantity)
+  const [contactValue, setContactValue] = useState("")
+  const [backupEmail, setBackupEmail] = useState("")
+  const [contactError, setContactError] = useState("")
+  const [queryPassword, setQueryPassword] = useState("")
   const [selectedPayment, setSelectedPayment] = useState(
     enabledChannels.length > 0 ? enabledChannels[0].channel_code : ""
   )
@@ -41,28 +51,49 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
   const currentPrice = selectedSpec ? selectedSpec.price : product.base_price
   const totalPrice = currentPrice * quantity
   const currentStock = selectedSpec?.stock_available ?? product.stock_available ?? 0
+  const quantityCeiling = product.maximum_purchase_quantity && product.maximum_purchase_quantity > 0
+    ? Math.min(product.maximum_purchase_quantity, currentStock || product.maximum_purchase_quantity)
+    : currentStock || minQuantity
   const isOutOfStock = currentStock === 0
   const deliveryType = product.delivery_type === "MANUAL" ? "manual" : "auto"
+  const cartSupported = contactType === "EMAIL"
 
-  const handleEmailChange = (value: string) => {
-    setEmail(value)
-    if (value && !validateEmail(value)) {
-      setEmailError(t("product.emailInvalid"))
-    } else {
-      setEmailError("")
-    }
+  const contactMeta = {
+    EMAIL: { label: t("product.email"), placeholder: t("product.emailPlaceholder"), helper: "支付成功后将通过邮箱或查单页取货", icon: Mail },
+    PHONE: { label: "联系方式", placeholder: "请输入手机号", helper: "此商品要求使用手机号下单", icon: Phone },
+    QQ: { label: "联系方式", placeholder: "请输入 QQ 号", helper: "此商品要求使用 QQ 号码下单", icon: MessageCircleMore },
+    TEXT: { label: "联系方式", placeholder: "请输入联系方式", helper: "请填写商家要求的联系方式", icon: MessageCircleMore },
+  }[contactType] || { label: "联系方式", placeholder: "请输入联系方式", helper: "请填写联系方式", icon: MessageCircleMore }
+
+  const validateContact = (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) return "请填写联系方式"
+    if (contactType === "EMAIL" && !validateEmail(trimmed)) return t("product.emailInvalid")
+    if (contactType === "PHONE" && !/^1\d{10}$/.test(trimmed)) return "手机号格式不正确"
+    if (contactType === "QQ" && !/^[1-9][0-9]{4,11}$/.test(trimmed)) return "QQ 号格式不正确"
+    return ""
+  }
+
+  const handleContactChange = (value: string) => {
+    setContactValue(value)
+    setContactError(validateContact(value))
   }
 
   const handleBuyNow = async () => {
-    if (!email.trim()) {
-      toast.error(t("product.emailRequired"))
+    const currentContactError = validateContact(contactValue)
+    if (currentContactError) {
+      toast.error(currentContactError)
       emailInputRef.current?.focus()
       emailInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
       return
     }
-    if (!validateEmail(email)) {
+    if (contactType !== "EMAIL" && backupEmail.trim() && !validateEmail(backupEmail.trim())) {
       toast.error(t("product.emailInvalid"))
-      emailInputRef.current?.focus()
+      backupEmailInputRef.current?.focus()
+      return
+    }
+    if (requiresQueryPassword && queryPassword.trim().length < 6) {
+      toast.error("查询密码至少 6 位")
       return
     }
     if (!selectedPayment) {
@@ -84,12 +115,15 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
           product_id: product.id,
           spec_id: selectedSpec?.id ?? null,
           quantity,
-          email,
+          email: contactType === "EMAIL" ? contactValue.trim() : backupEmail.trim(),
+          contact_value: contactValue.trim(),
+          query_password: queryPassword,
           payment_method: selectedPayment,
+          locale,
           idempotency_key: generateIdempotencyKey(),
           device,
         }),
-        () => mockCreateOrder(email, selectedPayment)
+        () => mockCreateOrder(contactType === "EMAIL" ? contactValue.trim() : backupEmail.trim(), selectedPayment)
       )
       toast.success(t("checkout.processingOrder"))
       const payUrlH5 = result.payment.pay_url || ""
@@ -153,11 +187,10 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
         {/* Price row + delivery status */}
         <div className="flex flex-wrap items-baseline justify-between gap-y-2">
           <div className="flex items-baseline gap-3">
-            <div className="flex items-baseline gap-0.5">
-              <span className="text-lg font-extrabold text-primary">{getCurrencySymbol(product.currency)}</span>
-              <span className="text-2xl font-extrabold text-primary">
-                {currentPrice.toFixed(2)}
-              </span>
+            <div className="text-2xl font-extrabold text-primary">
+              {selectedPayment
+                ? formatPaymentSettlementPrice(currentPrice, product.currency, selectedPayment, locale)
+                : formatStorefrontPrice(currentPrice, product.currency, locale)}
             </div>
           </div>
 
@@ -191,7 +224,7 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
         <div className="flex items-center gap-4 text-sm">
           <span className="flex items-center gap-1.5 text-muted-foreground">
             <Package className="h-3.5 w-3.5" />
-            {t("product.stock")} {selectedSpec?.stock_available ?? product.stock_available}
+            {product.inventory_hidden ? `${t("product.stock")} 充足` : `${t("product.stock")} ${selectedSpec?.stock_available ?? product.stock_available}`}
           </span>
           {((product.sales_count ?? 0) + (product.initial_sales ?? 0)) > 0 && (
             <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -213,7 +246,7 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
                   key={spec.id}
                   onClick={() => {
                     setSelectedSpec(spec)
-                    setQuantity(1)
+                    setQuantity(minQuantity)
                   }}
                   className={cn(
                     "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors",
@@ -236,6 +269,35 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
         )}
       </div>
 
+      <ContactPanel />
+
+      <div className="rounded-lg border border-border bg-muted/30 p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-primary" />
+          <p className="text-sm font-medium text-foreground">购买说明</p>
+        </div>
+        <div className="grid gap-2 text-sm text-muted-foreground">
+          <div className="flex items-start gap-2">
+            <contactMeta.icon className="mt-0.5 h-4 w-4 shrink-0 text-foreground/80" />
+            <span>{contactMeta.helper}</span>
+          </div>
+          {requiresQueryPassword && (
+            <div className="flex items-start gap-2">
+              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-foreground/80" />
+              <span>下单时需设置查询密码，支付完成后查单还需再次输入该密码才能查看卡密。</span>
+            </div>
+          )}
+          <div className="flex items-start gap-2">
+            <Package className="mt-0.5 h-4 w-4 shrink-0 text-foreground/80" />
+            <span>
+              起购 {minQuantity} 件
+              {product.maximum_purchase_quantity && product.maximum_purchase_quantity > 0 ? `，单次最多 ${product.maximum_purchase_quantity} 件` : ""}
+              {product.maximum_purchase_per_user && product.maximum_purchase_per_user > 0 ? `，每个用户累计最多 ${product.maximum_purchase_per_user} 件` : ""}
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Action area */}
       <div className="rounded-lg border border-border p-4 space-y-4">
         {/* Quantity */}
@@ -245,58 +307,87 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
           </label>
           <div className="inline-flex items-center rounded-md border border-border">
             <button
-              onClick={() => setQuantity(Math.max(1, quantity - 1))}
+              onClick={() => setQuantity(Math.max(minQuantity, quantity - 1))}
               className="inline-flex h-9 w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-accent"
-              disabled={quantity <= 1}
+              disabled={quantity <= minQuantity}
             >
               <Minus className="h-4 w-4" />
             </button>
             <input
               type="number"
-              min={1}
-              max={currentStock || 1}
+              min={minQuantity}
+              max={Math.max(minQuantity, quantityCeiling)}
               value={quantity}
               onChange={(e) => {
-                const v = parseInt(e.target.value) || 1
-                setQuantity(Math.min(v, currentStock || 1))
+                const v = parseInt(e.target.value) || minQuantity
+                setQuantity(Math.max(minQuantity, Math.min(v, Math.max(minQuantity, quantityCeiling))))
               }}
               className="h-9 w-16 border-x border-border bg-background text-center text-sm text-foreground [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             />
             <button
-              onClick={() => setQuantity(Math.min(quantity + 1, currentStock || 1))}
+              onClick={() => setQuantity(Math.min(quantity + 1, Math.max(minQuantity, quantityCeiling)))}
               className="inline-flex h-9 w-9 items-center justify-center text-muted-foreground transition-colors hover:bg-accent"
-              disabled={quantity >= currentStock}
+              disabled={quantity >= Math.max(minQuantity, quantityCeiling)}
             >
               <Plus className="h-4 w-4" />
             </button>
           </div>
         </div>
 
-        {/* Email input */}
+        {/* Contact input */}
         <div>
           <label className="mb-1.5 block text-sm font-medium text-foreground">
-            {t("product.email")}
+            {contactMeta.label}
           </label>
           <input
             ref={emailInputRef}
-            type="email"
-            placeholder={t("product.emailPlaceholder")}
-            value={email}
-            onChange={(e) => handleEmailChange(e.target.value)}
+            type={contactType === "EMAIL" ? "email" : "text"}
+            placeholder={contactMeta.placeholder}
+            value={contactValue}
+            onChange={(e) => handleContactChange(e.target.value)}
             className={cn(
               "h-10 w-full rounded-lg border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
-              emailError ? "border-destructive" : "border-input"
+              contactError ? "border-destructive" : "border-input"
             )}
           />
           <div className="mt-1.5">
             <p className="text-xs text-muted-foreground">
-              {t("product.emailFullHint")}
+              {contactType === "EMAIL" ? t("product.emailFullHint") : contactMeta.helper}
             </p>
-            {emailError && (
-              <p className="mt-1 text-xs text-destructive">{emailError}</p>
+            {contactError && (
+              <p className="mt-1 text-xs text-destructive">{contactError}</p>
             )}
           </div>
         </div>
+
+        {contactType !== "EMAIL" && (
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">接收邮箱（可选）</label>
+            <input
+              ref={backupEmailInputRef}
+              type="email"
+              placeholder={t("product.emailPlaceholder")}
+              value={backupEmail}
+              onChange={(e) => setBackupEmail(e.target.value)}
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">如填写，将用于发货邮件通知和后续找回。</p>
+          </div>
+        )}
+
+        {requiresQueryPassword && (
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-foreground">查询密码</label>
+            <input
+              type="password"
+              placeholder="请设置至少 6 位查询密码"
+              value={queryPassword}
+              onChange={(e) => setQueryPassword(e.target.value)}
+              className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">支付完成后查看卡密时，需要再次输入该密码。</p>
+          </div>
+        )}
 
         {/* Payment method */}
         <div>
@@ -307,20 +398,25 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
             channels={enabledChannels}
             selected={selectedPayment}
             onSelect={setSelectedPayment}
+            preferredCode={enabledChannels[0]?.channel_code}
           />
         </div>
 
         {/* Total */}
         <div className="flex items-baseline justify-between border-t border-border pt-4">
           <span className="text-sm text-muted-foreground">{t("product.totalPrice")}</span>
-          <div className="flex items-baseline gap-0.5">
-            <span className="text-lg font-bold text-primary">{getCurrencySymbol(product.currency)}</span>
-            <span className="text-2xl font-bold text-primary">
-              {totalPrice.toFixed(2)}
-            </span>
+          <div className="text-2xl font-bold text-primary">
+            {selectedPayment
+              ? formatPaymentSettlementPrice(totalPrice, product.currency, selectedPayment, locale)
+              : formatStorefrontPrice(totalPrice, product.currency, locale)}
           </div>
         </div>
 
+        {!cartSupported && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+            该商品使用非邮箱联系方式，暂不支持加入购物车，请直接立即购买。
+          </div>
+        )}
         <Turnstile onSuccess={setTurnstileToken} onError={handleTurnstileReset} className="mb-3" />
 
         {/* Action Buttons */}
@@ -339,7 +435,7 @@ export function ProductActions({ product, channels }: ProductActionsProps) {
           </button>
           <button
             onClick={handleAddToCart}
-            disabled={isOutOfStock}
+            disabled={isOutOfStock || !cartSupported}
             className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border bg-transparent px-5 text-sm font-medium text-foreground transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
           >
             <ShoppingCart className="h-4 w-4" />

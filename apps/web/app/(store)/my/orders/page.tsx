@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Package, ExternalLink } from "lucide-react"
 import { PaymentIcon, getPaymentLabel } from "@/components/shared/payment-icon"
+import { formatExactCurrency } from "@/lib/storefront-currency"
 import { useLocale } from "@/lib/context"
 import { useRequireAuth } from "@/lib/hooks"
 import { userApi, withMockFallback } from "@/services/api"
@@ -16,7 +17,7 @@ import { cn } from "@/lib/utils"
 const STATUS_FILTERS: (OrderStatus | "ALL")[] = ["ALL", "PENDING", "PAID", "DELIVERED", "EXPIRED"]
 
 export default function MyOrdersPage() {
-  const { t } = useLocale()
+  const { t, locale } = useLocale()
   const user = useRequireAuth()
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "ALL">("ALL")
   const [orders, setOrders] = useState<OrderBrief[]>([])
@@ -130,7 +131,7 @@ export default function MyOrdersPage() {
                 <span className="text-sm text-muted-foreground">
                   {t("order.amount")}:{" "}
                   <span className="font-semibold text-foreground">
-                    {"\u00A5"}{order.actual_amount.toFixed(2)}
+                    {formatExactCurrency(order.actual_amount, order.currency || "CNY", locale)}
                   </span>
                 </span>
                 <div className="flex gap-2">

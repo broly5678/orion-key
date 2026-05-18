@@ -1,0 +1,1 @@
+UPDATE orders SET status='PAID', paid_at=NOW() WHERE id='ac6c68e1-f26e-415e-96ee-a287f3c0d7de';

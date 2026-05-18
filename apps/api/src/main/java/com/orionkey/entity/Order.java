@@ -24,11 +24,25 @@ public class Order extends BaseEntity {
 
     private String email;
 
+    @Column(length = 20)
+    private String contactType = "EMAIL";
+
+    private String contactValue;
+
+    private String queryPasswordHash;
+
+    private String queryAccessToken;
+
+    private LocalDateTime queryAccessExpiresAt;
+
     @Column(precision = 10, scale = 2)
     private BigDecimal totalAmount;
 
     @Column(precision = 10, scale = 2)
     private BigDecimal actualAmount;
+
+    @Column(nullable = false, length = 10)
+    private String currency = "CNY";
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

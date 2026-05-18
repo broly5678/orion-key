@@ -31,9 +31,13 @@ public class CurrencyController {
 
     private Map<String, Object> toMap(Currency c) {
         Map<String, Object> map = new LinkedHashMap<>();
+        map.put("id", c.getId());
         map.put("code", c.getCode());
         map.put("name", c.getName());
         map.put("symbol", c.getSymbol());
+        map.put("rate_to_cny", c.getRateToCny());
+        map.put("is_enabled", c.isEnabled());
+        map.put("sort_order", c.getSortOrder());
         return map;
     }
 }

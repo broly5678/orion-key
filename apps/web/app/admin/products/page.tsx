@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, type RefObject } from "react"
+import { useState, useEffect, useCallback, useRef, type ChangeEvent, type RefObject } from "react"
 import { Plus, Search, Edit, Trash2, Upload, X, AlertCircle, ChevronDown, EyeOff, Eye, KeyRound, Loader2, ImagePlus } from "lucide-react"
 import { toast } from "sonner"
 import Link from "next/link"
@@ -67,6 +67,13 @@ export default function AdminProductsPage() {
     initial_sales: "",
     sort_order: "",
     delivery_type: "AUTO",
+    contact_type: "EMAIL",
+    query_password_enabled: true,
+    leave_message: "",
+    minimum_purchase_quantity: "1",
+    maximum_purchase_quantity: "0",
+    maximum_purchase_per_user: "0",
+    inventory_hidden: false,
   })
   const [formSpecs, setFormSpecs] = useState<{ id?: string; name: string; price: string; card_key_count?: number }[]>([])
   const [specDeleteConfirm, setSpecDeleteConfirm] = useState<{ idx: number; name: string; count: number } | null>(null)
@@ -143,6 +150,69 @@ export default function AdminProductsPage() {
 
   const getCategoryName = (id: string) => categories.find(c => c.id === id)?.name || "-"
 
+  const insertDetailImages = useCallback((markdownImages: string[]) => {
+    if (markdownImages.length === 0) return
+
+    const textarea = detailTextareaRef.current
+    const insertion = markdownImages.join("\n")
+
+    if (textarea) {
+      const start = textarea.selectionStart
+      const end = textarea.selectionEnd
+      const currentText = formData.detail_md
+      const before = currentText.substring(0, start)
+      const after = currentText.substring(end)
+      const prefix = before.length > 0 && !before.endsWith("\n") ? "\n" : ""
+      const newText = before + prefix + insertion + "\n" + after
+
+      setFormData(prev => ({ ...prev, detail_md: newText }))
+
+      requestAnimationFrame(() => {
+        const newPos = before.length + prefix.length + insertion.length + 1
+        textarea.selectionStart = textarea.selectionEnd = newPos
+        textarea.focus()
+      })
+      return
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      detail_md: prev.detail_md + (prev.detail_md ? "\n" : "") + insertion + "\n",
+    }))
+  }, [formData.detail_md])
+
+  const handleDetailImageInsert = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+
+    for (const file of files) {
+      const err = validateImageFile(file)
+      if (err) {
+        toast.error(`${file.name}: ${err}`)
+        e.target.value = ""
+        return
+      }
+    }
+
+    setDetailUploading(true)
+    try {
+      const markdownImages: string[] = []
+
+      for (const file of files) {
+        const result = await adminProductApi.uploadImage(file)
+        markdownImages.push(`![${file.name}](${result.url})`)
+      }
+
+      insertDetailImages(markdownImages)
+      toast.success(files.length === 1 ? "图片已插入" : `已插入 ${files.length} 张图片`)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "上传失败")
+    } finally {
+      setDetailUploading(false)
+      e.target.value = ""
+    }
+  }, [insertDetailImages])
+
   const handleEdit = (product: ProductDetail) => {
     setEditingProduct(product)
     setFormData({
@@ -159,6 +229,13 @@ export default function AdminProductsPage() {
       initial_sales: String(product.initial_sales ?? ""),
       sort_order: String(product.sort_order ?? ""),
       delivery_type: product.delivery_type || "AUTO",
+      contact_type: product.contact_type || "EMAIL",
+      query_password_enabled: product.query_password_enabled !== false,
+      leave_message: product.leave_message || "",
+      minimum_purchase_quantity: String(product.minimum_purchase_quantity ?? 1),
+      maximum_purchase_quantity: String(product.maximum_purchase_quantity ?? 0),
+      maximum_purchase_per_user: String(product.maximum_purchase_per_user ?? 0),
+      inventory_hidden: product.inventory_hidden === true,
     })
     const specs = product.specs.map(s => ({
       id: s.id,
@@ -262,6 +339,14 @@ export default function AdminProductsPage() {
         initial_sales: parseInt(formData.initial_sales) || 0,
         sort_order: parseInt(formData.sort_order) || undefined,
         delivery_type: formData.delivery_type,
+        contact_type: formData.contact_type,
+        query_password_enabled: formData.query_password_enabled,
+        leave_message: formData.leave_message || undefined,
+        minimum_purchase_quantity: Math.max(1, parseInt(formData.minimum_purchase_quantity) || 1),
+        maximum_purchase_quantity: Math.max(0, parseInt(formData.maximum_purchase_quantity) || 0),
+        maximum_purchase_per_user: Math.max(0, parseInt(formData.maximum_purchase_per_user) || 0),
+        only_for_logged_in_users: false,
+        inventory_hidden: formData.inventory_hidden,
       }
 
       let productId: string
@@ -322,7 +407,28 @@ export default function AdminProductsPage() {
   const handleCloseModal = () => {
     setShowModal(false)
     setEditingProduct(null)
-    setFormData({ title: "", description: "", detail_md: "", category_id: "", base_price: "", currency: "CNY", cover_url: "", low_stock_threshold: "10", wholesale_enabled: false, is_enabled: true, initial_sales: "", sort_order: "", delivery_type: "AUTO" })
+    setFormData({
+      title: "",
+      description: "",
+      detail_md: "",
+      category_id: "",
+      base_price: "",
+      currency: "CNY",
+      cover_url: "",
+      low_stock_threshold: "10",
+      wholesale_enabled: false,
+      is_enabled: true,
+      initial_sales: "",
+      sort_order: "",
+      delivery_type: "AUTO",
+      contact_type: "EMAIL",
+      query_password_enabled: true,
+      leave_message: "",
+      minimum_purchase_quantity: "1",
+      maximum_purchase_quantity: "0",
+      maximum_purchase_per_user: "0",
+      inventory_hidden: false,
+    })
     setFormSpecs([])
     setSpecsEnabled(false)
     setSpecDeleteConfirm(null)
@@ -658,6 +764,74 @@ export default function AdminProductsPage() {
                   </button>
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-foreground">联系方式类型</label>
+                  <select
+                    className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    value={formData.contact_type}
+                    onChange={(e) => setFormData({ ...formData, contact_type: e.target.value })}
+                  >
+                    <option value="EMAIL">邮箱</option>
+                    <option value="PHONE">手机号</option>
+                    <option value="QQ">QQ 号</option>
+                    <option value="TEXT">通用文本</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-foreground">查询密码</label>
+                  <div className="flex h-10 items-center gap-2">
+                    <button
+                      type="button"
+                      className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", formData.query_password_enabled ? "bg-primary" : "bg-muted")}
+                      onClick={() => setFormData({ ...formData, query_password_enabled: !formData.query_password_enabled })}
+                    >
+                      <span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform", formData.query_password_enabled && "translate-x-5")} />
+                    </button>
+                    <span className="text-sm text-muted-foreground">{formData.query_password_enabled ? "下单必须设置查询密码" : "不启用"}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-foreground">最小购买数</label>
+                  <input type="number" min="1" className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" value={formData.minimum_purchase_quantity} onChange={(e) => setFormData({ ...formData, minimum_purchase_quantity: e.target.value })} />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-foreground">单次最大购买数</label>
+                  <input type="number" min="0" className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" value={formData.maximum_purchase_quantity} onChange={(e) => setFormData({ ...formData, maximum_purchase_quantity: e.target.value })} />
+                  <p className="text-xs text-muted-foreground">填 0 表示不限制</p>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-foreground">每用户累计限购</label>
+                  <input type="number" min="0" className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" value={formData.maximum_purchase_per_user} onChange={(e) => setFormData({ ...formData, maximum_purchase_per_user: e.target.value })} />
+                  <p className="text-xs text-muted-foreground">填 0 表示不限制</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-foreground">隐藏精确库存</label>
+                  <div className="flex h-10 items-center gap-2">
+                    <button
+                      type="button"
+                      className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", formData.inventory_hidden ? "bg-primary" : "bg-muted")}
+                      onClick={() => setFormData({ ...formData, inventory_hidden: !formData.inventory_hidden })}
+                    >
+                      <span className={cn("absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform", formData.inventory_hidden && "translate-x-5")} />
+                    </button>
+                    <span className="text-sm text-muted-foreground">{formData.inventory_hidden ? "前台不显示真实库存" : "显示真实库存"}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-foreground">发货附加说明</label>
+                <textarea
+                  className="min-h-24 rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  placeholder="例如：卡密到账后请尽快绑定；如遇问题请联系客服。解锁订单后会一并展示给用户。"
+                  value={formData.leave_message}
+                  onChange={(e) => setFormData({ ...formData, leave_message: e.target.value })}
+                />
+              </div>
               {/* 商品规格 */}
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
@@ -748,41 +922,9 @@ export default function AdminProductsPage() {
                     <input
                       type="file"
                       accept={ALLOWED_IMAGE_ACCEPT}
+                      multiple
                       className="hidden"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0]
-                        if (!file) return
-                        const err = validateImageFile(file)
-                        if (err) { toast.error(err); e.target.value = ""; return }
-                        setDetailUploading(true)
-                        try {
-                          const result = await adminProductApi.uploadImage(file)
-                          const textarea = detailTextareaRef.current
-                          const mdImage = `![${file.name}](${result.url})`
-                          if (textarea) {
-                            const start = textarea.selectionStart
-                            const end = textarea.selectionEnd
-                            const text = formData.detail_md
-                            const before = text.substring(0, start)
-                            const after = text.substring(end)
-                            const newText = before + (before.length > 0 && !before.endsWith("\n") ? "\n" : "") + mdImage + "\n" + after
-                            setFormData(prev => ({ ...prev, detail_md: newText }))
-                            requestAnimationFrame(() => {
-                              const newPos = before.length + (before.length > 0 && !before.endsWith("\n") ? 1 : 0) + mdImage.length + 1
-                              textarea.selectionStart = textarea.selectionEnd = newPos
-                              textarea.focus()
-                            })
-                          } else {
-                            setFormData(prev => ({ ...prev, detail_md: prev.detail_md + (prev.detail_md ? "\n" : "") + mdImage + "\n" }))
-                          }
-                          toast.success("图片已插入")
-                        } catch (err: unknown) {
-                          toast.error(err instanceof Error ? err.message : "上传失败")
-                        } finally {
-                          setDetailUploading(false)
-                          e.target.value = ""
-                        }
-                      }}
+                      onChange={handleDetailImageInsert}
                     />
                   </label>
                 </div>
@@ -794,6 +936,7 @@ export default function AdminProductsPage() {
                   onChange={(e) => setFormData({ ...formData, detail_md: e.target.value })}
                 />
               </div>
+
             </div>
             <div className="flex justify-end gap-3 border-t border-border px-6 py-4">
               <button type="button" className="rounded-lg border border-input bg-transparent px-4 py-2 text-sm font-medium text-foreground hover:bg-accent transition-colors" onClick={handleCloseModal}>{t("admin.cancel")}</button>

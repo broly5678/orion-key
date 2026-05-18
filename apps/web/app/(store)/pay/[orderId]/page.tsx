@@ -10,12 +10,9 @@ import {
   XCircle,
   RefreshCw,
   Copy,
-  ExternalLink,
   HelpCircle,
   Loader2,
-  Info,
   ArrowRight,
-  AlertTriangle,
   Smartphone,
 } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
@@ -24,6 +21,7 @@ import { useLocale, useCart, useSiteConfig } from "@/lib/context"
 import { orderApi } from "@/services/api"
 import type { OrderStatus } from "@/types"
 import { cn, detectPaymentDevice, isMobileDevice } from "@/lib/utils"
+import { ContactLinks } from "@/components/shared/contact-links"
 import { PaymentIcon, getPaymentLabel, getPaymentBrandColor, getPaymentScanHint } from "@/components/shared/payment-icon"
 
 const POLL_INTERVAL = 3000 // 3 seconds
@@ -51,14 +49,16 @@ export default function PaymentPage({ params }: { params: Promise<{ orderId: str
   const isMobile = isMobileDevice()
 
   const paymentMethod = searchParams.get("method") || "alipay"
+  const normalizedPaymentMethod = paymentMethod.toLowerCase()
   const paymentMethodName = getPaymentLabel(paymentMethod, t)
   const scanHint = getPaymentScanHint(paymentMethod, t)
   const brandColor = getPaymentBrandColor(paymentMethod)
 
   // USDT 支付判断 & 参数
   const isUsdtPayment = paymentMethod.startsWith("usdt_")
+  const isRedirectOnlyPayment = ["stripe", "paypal"].includes(normalizedPaymentMethod)
   // 微信移动端：jspay 走 JSAPI（需微信内置浏览器），普通浏览器只能展示二维码
-  const isWechatMobile = isMobile && ["wechat", "wxpay"].includes(paymentMethod.toLowerCase())
+  const isWechatMobile = isMobile && ["wechat", "wxpay"].includes(normalizedPaymentMethod)
   const walletAddress = searchParams.get("wallet") || ""
   const cryptoAmount = searchParams.get("crypto_amount") || ""
   const usdtChain = searchParams.get("chain") || paymentMethod
@@ -90,6 +90,9 @@ export default function PaymentPage({ params }: { params: Promise<{ orderId: str
         }
         if (!qrFromParam && result.payment_url) {
           setQrcodeUrl(result.payment_url)
+          if (isRedirectOnlyPayment) {
+            setPayUrlH5(result.payment_url)
+          }
         }
         if (result.status !== "PENDING") {
           setStatus(result.status)
@@ -99,7 +102,7 @@ export default function PaymentPage({ params }: { params: Promise<{ orderId: str
       }
     }
     fetchOrderInfo()
-  }, [orderId, searchParams])
+  }, [orderId, searchParams, isRedirectOnlyPayment])
 
   // H5 自动跳转（移动端 + 有 payUrl + PENDING 状态 + 未跳转过 + 非微信）
   // 微信 jspay 走 JSAPI（需微信浏览器），普通浏览器不能 H5 跳转，只能扫码
@@ -163,6 +166,9 @@ export default function PaymentPage({ params }: { params: Promise<{ orderId: str
     setIsRefreshing(true)
     try {
       const result = await orderApi.getStatus(orderId)
+      if (result.payment_url && isRedirectOnlyPayment) {
+        setPayUrlH5(result.payment_url)
+      }
       if (result.status !== "PENDING") {
         setStatus(result.status)
         if (result.status === "PAID" || result.status === "DELIVERED") {
@@ -176,7 +182,7 @@ export default function PaymentPage({ params }: { params: Promise<{ orderId: str
       setRefreshCooldown(MANUAL_REFRESH_COOLDOWN)
       toast.info(t("payment.statusRefreshed"))
     }
-  }, [refreshCooldown, isRefreshing, orderId, t])
+  }, [refreshCooldown, isRefreshing, orderId, t, isRedirectOnlyPayment])
 
   // 重新发起支付（移动端重试）
   const handleRetryPayment = useCallback(async () => {
@@ -307,6 +313,10 @@ export default function PaymentPage({ params }: { params: Promise<{ orderId: str
           </span>
         </div>
 
+        <div className="w-full rounded-lg border border-border bg-muted/30 px-4 py-3 text-center text-xs text-muted-foreground">
+          支付完成后会自动跳转到订单查询页；若该商品启用了查询密码，届时仍需输入下单时设置的查询密码才能查看卡密。
+        </div>
+
         {isUsdtPayment ? (
           /* ========== USDT 支付视图（紧凑居中布局） ========== */
           <div className="flex w-full flex-col items-center gap-3">
@@ -395,6 +405,29 @@ export default function PaymentPage({ params }: { params: Promise<{ orderId: str
 
             {/* 检测状态 */}
             <p className="animate-pulse text-sm text-primary">{t("payment.detecting")}</p>
+          </div>
+        ) : isRedirectOnlyPayment ? (
+          <div className="flex w-full flex-col items-center gap-4">
+            <div
+              className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl px-6 py-6 text-center"
+              style={{ backgroundColor: brandColor || "#635BFF" }}
+            >
+              <div className="flex items-center gap-2.5">
+                <PaymentIcon method={paymentMethod} className="h-10 w-10" variant="plain" />
+                <span className="text-xl font-bold text-white">{paymentMethodName}</span>
+              </div>
+              <p className="text-sm font-medium text-white/90">{scanHint}</p>
+              <a
+                href={payUrlH5 || qrcodeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 items-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-zinc-900 transition-colors hover:bg-white/90"
+              >
+                {t("payment.goPay")}
+                <ArrowRight className="h-4 w-4" />
+              </a>
+            </div>
+            <p className="text-sm text-muted-foreground">{t("payment.statusPendingHint")}</p>
           </div>
         ) : (!isMobile || isWechatMobile) ? (
           /* ========== PC / 微信移动端 — 二维码视图 ========== */
@@ -526,32 +559,21 @@ export default function PaymentPage({ params }: { params: Promise<{ orderId: str
         </Link>
 
         {/* 联系客服 */}
-        {(config?.contact_telegram || config?.contact_email) && (
+        {(
+          (config?.contact_email_enabled && config?.contact_email) ||
+          (config?.contact_qq_enabled && config?.contact_qq) ||
+          (config?.contact_qq_group_enabled && config?.contact_qq_group) ||
+          (config?.contact_wechat_enabled && config?.contact_wechat) ||
+          (config?.contact_wechat_group_enabled && config?.contact_wechat_group) ||
+          (config?.contact_telegram_enabled && config?.contact_telegram) ||
+          (config?.contact_telegram_group_enabled && config?.contact_telegram_group) ||
+          (config?.contact_whatsapp_enabled && config?.contact_whatsapp) ||
+          (config?.contact_x_enabled && config?.contact_x)
+        ) && (
           <div className="flex flex-wrap items-center justify-center gap-x-1 text-muted-foreground">
             <HelpCircle className="h-3.5 w-3.5" />
             <span>{t("payment.needHelp")}</span>
-            {config.contact_telegram && (
-              <a
-                href={config.contact_telegram}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-0.5 underline-offset-4 transition-colors hover:text-foreground hover:underline"
-              >
-                {t("payment.contactSupport")}
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            )}
-            {config.contact_telegram && config.contact_email && (
-              <span>·</span>
-            )}
-            {config.contact_email && (
-              <a
-                href={`mailto:${config.contact_email}`}
-                className="underline-offset-4 transition-colors hover:text-foreground hover:underline"
-              >
-                {t("order.contactEmail")}
-              </a>
-            )}
+            <ContactLinks itemClassName="border-0 bg-transparent px-1.5 py-0 text-sm underline-offset-4 hover:underline" contentMode="value" />
           </div>
         )}
       </div>

@@ -16,6 +16,7 @@ import type {
   CreateCartOrderRequest,
   CreateOrderResult,
   DeliverResult,
+  UnlockOrderResult,
   SiteConfig,
   SiteConfigKV,
   DashboardStats,
@@ -361,12 +362,17 @@ export const orderApi = {
     request<{ order_id: string; status: OrderStatus; expires_at: string; remaining_seconds: number; payment_url?: string }>(`/orders/${orderId}/status`),
   refreshStatus: (orderId: string) =>
     request<{ status: OrderStatus }>(`/orders/${orderId}/refresh`, { method: "POST" }),
-  query: (data: { order_ids?: string[]; emails?: string[] }) =>
+  query: (data: { order_ids?: string[]; emails?: string[]; contact_values?: string[] }) =>
     request<OrderBrief[]>("/orders/query", { method: "POST", body: JSON.stringify(data) }),
   deliver: (data: { order_ids: string[] }) =>
     request<DeliverResult[]>("/orders/deliver", { method: "POST", body: JSON.stringify(data) }),
-  exportKeys: (orderId: string) =>
-    request<string>(`/orders/${orderId}/export`),
+  unlock: (orderId: string, queryPassword: string) =>
+    request<UnlockOrderResult>(`/orders/${orderId}/unlock`, {
+      method: "POST",
+      body: JSON.stringify({ query_password: queryPassword }),
+    }),
+  exportKeysUrl: (orderId: string, token: string) =>
+    `${API_BASE}/orders/${orderId}/export?token=${encodeURIComponent(token)}`,
   submitTxid: (orderId: string, txid: string) =>
     request<TxidVerifyResult>(`/orders/${orderId}/txid-verify`, {
       method: "POST",
@@ -406,6 +412,29 @@ export const currencyApi = {
     request<CurrencyItem[]>("/currencies"),
 }
 
+export const adminCurrencyApi = {
+  getList: () =>
+    request<CurrencyItem[]>("/admin/currencies"),
+  create: (data: {
+    code: string
+    name: string
+    symbol: string
+    rate_to_cny: number
+    is_enabled?: boolean
+    sort_order?: number
+  }) => request<null>("/admin/currencies", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: string, data: Partial<{
+    code: string
+    name: string
+    symbol: string
+    rate_to_cny: number
+    is_enabled: boolean
+    sort_order: number
+  }>) => request<null>(`/admin/currencies/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    request<null>(`/admin/currencies/${id}`, { method: "DELETE" }),
+}
+
 // ============================================================
 // Admin Dashboard
 // ============================================================
@@ -433,13 +462,19 @@ export const adminProductApi = {
   create: (data: {
     title: string; description?: string; detail_md?: string; cover_url?: string;
     base_price: number; category_id: string; low_stock_threshold?: number;
-    wholesale_enabled?: boolean; is_enabled?: boolean; sort_order?: number
+    wholesale_enabled?: boolean; is_enabled?: boolean; sort_order?: number;
+    delivery_type?: string; contact_type?: string; query_password_enabled?: boolean;
+    leave_message?: string; minimum_purchase_quantity?: number; maximum_purchase_quantity?: number;
+    maximum_purchase_per_user?: number; only_for_logged_in_users?: boolean; inventory_hidden?: boolean
   }) =>
     request<ProductDetail>("/admin/products", { method: "POST", body: JSON.stringify(data) }),
   update: (id: string, data: Partial<{
     title: string; description: string; detail_md: string; cover_url: string;
     base_price: number; category_id: string; low_stock_threshold: number;
-    wholesale_enabled: boolean; is_enabled: boolean; sort_order: number
+    wholesale_enabled: boolean; is_enabled: boolean; sort_order: number;
+    delivery_type: string; contact_type: string; query_password_enabled: boolean;
+    leave_message: string; minimum_purchase_quantity: number; maximum_purchase_quantity: number;
+    maximum_purchase_per_user: number; only_for_logged_in_users: boolean; inventory_hidden: boolean
   }>) =>
     request<null>(`/admin/products/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) =>
@@ -539,6 +574,8 @@ export const adminUserApi = {
   },
   toggleStatus: (id: string, isDeleted: 0 | 1) =>
     request<null>(`/admin/users/${id}/toggle`, { method: "POST", body: JSON.stringify({ is_deleted: isDeleted }) }),
+  resetPassword: (id: string, newPassword: string) =>
+    request<null>(`/admin/users/${id}/password`, { method: "PUT", body: JSON.stringify({ new_password: newPassword }) }),
 }
 
 // ============================================================
@@ -554,6 +591,11 @@ export const adminPaymentApi = {
     request<null>(`/admin/payment-channels/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) =>
     request<null>(`/admin/payment-channels/${id}`, { method: "DELETE" }),
+  uploadPaymentKey: (file: File) => {
+    const formData = new FormData()
+    formData.append("file", file)
+    return uploadRequest<{ path: string }>("/upload/payment-key", formData)
+  },
 }
 
 // ============================================================

@@ -3,13 +3,27 @@
 import { useCallback, useRef, useState, useEffect } from "react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { ShoppingCart, User, LogIn, Menu, X, Globe, Moon, Sun, Package, Search, Settings, ChevronDown, SlidersHorizontal, LogOut, ClipboardList } from "lucide-react"
+import { ShoppingCart, User, LogIn, Menu, X, Globe, Moon, Sun, Search, Settings, ChevronDown, SlidersHorizontal, LogOut, ClipboardList, MessageCircleMore } from "lucide-react"
 import { useAuth, useLocale, useTheme, useColorScheme, useSearch, useCart, useSiteConfig, COLOR_SCHEMES, type SortKey } from "@/lib/context"
+import { BrandMark } from "@/components/shared/brand-mark"
+import { ContactLinks } from "@/components/shared/contact-links"
+import { localizeSiteConfigValue, localizeSiteField } from "@/lib/storefront-site-i18n"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 
 interface StoreHeaderProps {
   siteName?: string
 }
+
+const LANGUAGE_OPTIONS = [
+  { value: "zh", label: "中文" },
+  { value: "en", label: "English" },
+  { value: "ja", label: "日本語" },
+  { value: "ko", label: "한국어" },
+  { value: "es", label: "Español" },
+  { value: "fr", label: "Français" },
+  { value: "de", label: "Deutsch" },
+] as const
 
 export function StoreHeader({ siteName }: StoreHeaderProps) {
   const { t, locale, setLocale } = useLocale()
@@ -71,7 +85,6 @@ export function StoreHeader({ siteName }: StoreHeaderProps) {
   ]
 
   const toggleTheme = () => setTheme(resolvedTheme === "dark" ? "light" : "dark")
-  const toggleLocale = () => setLocale(locale === "zh" ? "en" : "zh")
 
   const sortOptions: { key: SortKey; label: string }[] = [
     { key: "default", label: t("home.sortDefault") },
@@ -83,6 +96,7 @@ export function StoreHeader({ siteName }: StoreHeaderProps) {
 
   const activeFilterCount =
     (inStockOnly ? 1 : 0) + (priceMin ? 1 : 0) + (priceMax ? 1 : 0)
+  const resolvedSiteName = siteName || localizeSiteConfigValue(siteConfig, "site_name", locale) || localizeSiteField("site_name", "FK Shop", locale)
 
   const resetFilters = () => {
     setInStockOnly(false)
@@ -97,11 +111,11 @@ export function StoreHeader({ siteName }: StoreHeaderProps) {
         <div className="flex min-w-0 flex-1 items-center">
           <Link href="/" className="flex shrink-0 items-center gap-2.5 text-foreground">
             {siteConfig?.logo_url ? (
-              <img src={siteConfig.logo_url} alt={siteName || siteConfig?.site_name || ""} className="h-6 w-6 rounded object-contain" />
+              <img src={siteConfig.logo_url} alt={resolvedSiteName} className="h-6 w-6 rounded object-contain" />
             ) : (
-              <Package className="h-6 w-6 text-primary" />
+              <BrandMark className="h-6 w-6 text-primary" />
             )}
-            <span className="hidden text-lg font-extrabold tracking-tight sm:inline">{siteName || siteConfig?.site_name}</span>
+            <span className="hidden text-lg font-extrabold tracking-tight sm:inline">{resolvedSiteName}</span>
           </Link>
         </div>
 
@@ -207,13 +221,59 @@ export function StoreHeader({ siteName }: StoreHeaderProps) {
           </button>
 
           {/* Locale Toggle */}
-          <button
-            onClick={toggleLocale}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-            aria-label="Toggle language"
-          >
-            <Globe className="h-4 w-4" />
-          </button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                aria-label="Change language"
+              >
+                <Globe className="h-4 w-4" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-44 p-1">
+              <div className="space-y-1">
+                {LANGUAGE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setLocale(option.value)}
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors",
+                      locale === option.value
+                        ? "bg-accent font-medium text-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                    )}
+                  >
+                    <span>{option.label}</span>
+                    {locale === option.value && <span className="text-xs text-primary">Current</span>}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="hidden lg:inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/70 bg-background/70 px-3 text-sm font-medium text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-foreground"
+                aria-label={t("order.needHelp")}
+              >
+                <MessageCircleMore className="h-4 w-4 text-primary" />
+                <span>{t("order.needHelp")}</span>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="hidden w-[22rem] lg:block">
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{t("order.needHelp")}</p>
+                  <p className="text-xs text-muted-foreground">{t("order.contactTip")}</p>
+                </div>
+                <ContactLinks className="gap-2" itemClassName="w-full justify-start rounded-xl px-3 py-2" contentMode="both" />
+              </div>
+            </PopoverContent>
+          </Popover>
 
           {/* Order Query (mobile only) */}
           <Link
@@ -371,9 +431,9 @@ export function StoreHeader({ siteName }: StoreHeaderProps) {
               <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-muted-foreground">{t("home.filterPrice")}:</span>
-                  <input type="number" placeholder="Min" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} className="h-8 w-20 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <input type="number" placeholder={t("common.min")} value={priceMin} onChange={(e) => setPriceMin(e.target.value)} className="h-8 w-20 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                   <span className="text-xs text-muted-foreground">-</span>
-                  <input type="number" placeholder="Max" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} className="h-8 w-20 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <input type="number" placeholder={t("common.max")} value={priceMax} onChange={(e) => setPriceMax(e.target.value)} className="h-8 w-20 rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <label className="flex cursor-pointer items-center gap-1.5">
                   <input type="checkbox" checked={inStockOnly} onChange={(e) => setInStockOnly(e.target.checked)} className="h-3.5 w-3.5 rounded border-input accent-foreground" />
@@ -421,7 +481,7 @@ export function StoreHeader({ siteName }: StoreHeaderProps) {
             {/* Color scheme (mobile only) */}
             <hr className="my-1 border-border sm:hidden" />
             <div className="flex items-center gap-2 px-3 py-2 sm:hidden">
-              <span className="text-sm text-muted-foreground">{locale === "zh" ? "主题色" : "Theme"}</span>
+              <span className="text-sm text-muted-foreground">{t("theme.colorLabel")}</span>
               <div className="flex gap-1.5">
                 {COLOR_SCHEMES.map((scheme) => (
                   <button
@@ -437,6 +497,36 @@ export function StoreHeader({ siteName }: StoreHeaderProps) {
                     aria-label={scheme.label}
                   />
                 ))}
+              </div>
+            </div>
+            <div className="px-3 py-2">
+              <ContactLinks />
+            </div>
+            <div className="px-3 py-2">
+              <div className="rounded-lg border border-border bg-card p-2">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">
+                  {t("theme.languageLabel")}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => {
+                        setLocale(option.value)
+                        setMobileMenuOpen(false)
+                      }}
+                      className={cn(
+                        "rounded-md px-2 py-2 text-left text-sm transition-colors",
+                        locale === option.value
+                          ? "bg-accent font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

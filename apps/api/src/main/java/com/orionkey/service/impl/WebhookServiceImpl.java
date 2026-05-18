@@ -13,8 +13,13 @@ import com.orionkey.repository.PaymentChannelRepository;
 import com.orionkey.repository.WebhookEventRepository;
 import com.orionkey.service.BepusdtService;
 import com.orionkey.service.EpayService;
+import com.orionkey.service.NativeAlipayService;
+import com.orionkey.service.NativeWxpayService;
+import com.orionkey.service.PaypalService;
+import com.orionkey.service.StripeService;
 import com.orionkey.service.TxidVerifyService;
 import com.orionkey.service.WebhookService;
+import com.orionkey.util.PaymentCurrencyUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,6 +42,10 @@ public class WebhookServiceImpl implements WebhookService {
     private final PaymentChannelRepository paymentChannelRepository;
     private final EpayService epayService;
     private final BepusdtService bepusdtService;
+    private final NativeAlipayService nativeAlipayService;
+    private final NativeWxpayService nativeWxpayService;
+    private final PaypalService paypalService;
+    private final StripeService stripeService;
     private final ObjectMapper objectMapper;
     private final PaymentServiceImpl paymentService;
     private final TxidVerifyService txidVerifyService;
@@ -320,6 +329,375 @@ public class WebhookServiceImpl implements WebhookService {
         return "ok";
     }
 
+    @Override
+    @Transactional
+    public String processNativeAlipayCallback(Map<String, String> params) {
+        PaymentChannel channel = paymentChannelRepository
+                .findFirstByProviderTypeAndEnabledAndIsDeleted("native_alipay", true, 0)
+                .orElse(null);
+        if (channel == null) {
+            log.error("Native Alipay callback rejected: enabled channel not found");
+            return "failure";
+        }
+
+        NativeAlipayService.NativeAlipayConfig config = paymentService.buildNativeAlipayConfig(channel);
+        if (!nativeAlipayService.verifyCallback(config, params)) {
+            log.error("Native Alipay callback signature verification failed");
+            return "failure";
+        }
+
+        String tradeStatus = params.get("trade_status");
+        if (!"TRADE_SUCCESS".equals(tradeStatus) && !"TRADE_FINISHED".equals(tradeStatus)) {
+            log.info("Native Alipay callback ignored: trade_status={}", tradeStatus);
+            return "success";
+        }
+
+        String outTradeNo = params.get("out_trade_no");
+        UUID orderId;
+        try {
+            orderId = UUID.fromString(outTradeNo);
+        } catch (Exception e) {
+            log.error("Native Alipay callback invalid out_trade_no: {}", outTradeNo);
+            return "failure";
+        }
+
+        String tradeNo = params.get("trade_no");
+        String eventId = "native_alipay_" + (tradeNo != null ? tradeNo : outTradeNo);
+        if (webhookEventRepository.findByEventId(eventId).isPresent()) {
+            log.info("Native Alipay callback already processed: {}", eventId);
+            return "success";
+        }
+
+        Order order = orderRepository.findById(orderId).orElse(null);
+        if (order == null) {
+            log.warn("Native Alipay callback order not found: {}", orderId);
+            return "failure";
+        }
+
+        BigDecimal callbackAmount;
+        try {
+            callbackAmount = new BigDecimal(params.getOrDefault("total_amount", ""));
+        } catch (Exception e) {
+            log.error("Native Alipay callback invalid total_amount: {}", params.get("total_amount"));
+            return "failure";
+        }
+        if (order.getActualAmount().compareTo(callbackAmount) != 0) {
+            log.error("Native Alipay callback amount mismatch: expected={}, actual={}, order={}",
+                    order.getActualAmount(), callbackAmount, orderId);
+            return "failure";
+        }
+
+        WebhookEvent event = new WebhookEvent();
+        event.setEventId(eventId);
+        event.setChannelCode("alipay");
+        event.setOrderId(orderId);
+        event.setPayload(params.toString());
+
+        if (order.getStatus() == OrderStatus.PENDING) {
+            order.setStatus(OrderStatus.PAID);
+            order.setPaidAt(LocalDateTime.now());
+            order.setEpayTradeNo(tradeNo);
+            orderRepository.save(order);
+            event.setProcessResult("SUCCESS");
+            log.info("Native Alipay callback: order {} marked as PAID", orderId);
+        } else {
+            event.setProcessResult("SKIPPED_" + order.getStatus().name());
+            log.info("Native Alipay callback: order {} already {}", orderId, order.getStatus());
+        }
+
+        webhookEventRepository.save(event);
+        return "success";
+    }
+
+    @Override
+    @Transactional
+    public String processNativeWxpayCallback(String payload, Map<String, String> headers) {
+        PaymentChannel channel = paymentChannelRepository
+                .findFirstByProviderTypeAndEnabledAndIsDeleted("native_wxpay", true, 0)
+                .orElse(null);
+        if (channel == null) {
+            log.error("Native WeChat callback rejected: enabled channel not found");
+            return "fail";
+        }
+
+        NativeWxpayService.NativeWxpayConfig config = paymentService.buildNativeWxpayConfig(channel);
+        NativeWxpayService.WxpayCallbackResult callback;
+        try {
+            callback = nativeWxpayService.parseCallback(config, payload, headers);
+        } catch (BusinessException e) {
+            log.error("Native WeChat callback verification failed: {}", e.getMessage());
+            return "fail";
+        }
+
+        if (!config.appId().equals(callback.appId()) || !config.mchId().equals(callback.mchId())) {
+            log.error("Native WeChat callback appid/mchid mismatch: appid={}, mchid={}", callback.appId(), callback.mchId());
+            return "fail";
+        }
+        if (!"SUCCESS".equalsIgnoreCase(callback.tradeState())) {
+            log.info("Native WeChat callback ignored: trade_state={}", callback.tradeState());
+            return "ok";
+        }
+
+        if (callback.eventId() != null && webhookEventRepository.findByEventId(callback.eventId()).isPresent()) {
+            log.info("Native WeChat callback already processed: {}", callback.eventId());
+            return "ok";
+        }
+
+        UUID orderId = parseUuid(callback.orderId());
+        if (orderId == null) {
+            log.error("Native WeChat callback invalid order id: {}", callback.orderId());
+            return "fail";
+        }
+        Order order = orderRepository.findById(orderId).orElse(null);
+        if (order == null) {
+            log.warn("Native WeChat callback order not found: {}", orderId);
+            return "fail";
+        }
+
+        long expectedAmount = PaymentCurrencyUtils.toStripeMinorUnit(order.getActualAmount(), "CNY");
+        if (expectedAmount != callback.totalAmount()) {
+            log.error("Native WeChat callback amount mismatch: expected={}, actual={}, order={}",
+                    expectedAmount, callback.totalAmount(), orderId);
+            return "fail";
+        }
+        if (!"CNY".equalsIgnoreCase(PaymentCurrencyUtils.normalizeCurrency(callback.currency()))) {
+            log.error("Native WeChat callback currency mismatch: {}", callback.currency());
+            return "fail";
+        }
+
+        WebhookEvent event = new WebhookEvent();
+        event.setEventId(callback.eventId() != null ? callback.eventId() : "native_wxpay_" + callback.transactionId());
+        event.setChannelCode("wechat");
+        event.setOrderId(orderId);
+        event.setPayload(callback.rawBody());
+
+        if (order.getStatus() == OrderStatus.PENDING) {
+            order.setStatus(OrderStatus.PAID);
+            order.setPaidAt(LocalDateTime.now());
+            order.setEpayTradeNo(callback.transactionId());
+            orderRepository.save(order);
+            event.setProcessResult("SUCCESS");
+            log.info("Native WeChat callback: order {} marked as PAID", orderId);
+        } else {
+            event.setProcessResult("SKIPPED_" + order.getStatus().name());
+            log.info("Native WeChat callback: order {} already {}", orderId, order.getStatus());
+        }
+
+        webhookEventRepository.save(event);
+        return "ok";
+    }
+
+    @Override
+    @Transactional
+    public String processStripeCallback(String payload, String signatureHeader) {
+        PaymentChannel channel = paymentChannelRepository
+                .findFirstByProviderTypeAndEnabledAndIsDeleted("stripe", true, 0)
+                .orElse(null);
+        if (channel == null) {
+            log.error("Stripe webhook rejected: enabled stripe channel not found");
+            return "fail";
+        }
+
+        Map<String, String> cfg = parseConfigData(channel.getConfigData());
+        String webhookSecret = cfg.get("webhook_secret");
+        if (!stripeService.verifyWebhookSignature(webhookSecret, payload, signatureHeader)) {
+            log.error("Stripe webhook signature verification failed");
+            return "fail";
+        }
+
+        try {
+            Map<String, Object> event = objectMapper.readValue(payload, new TypeReference<>() {});
+            String eventId = stringValue(event.get("id"));
+            String type = stringValue(event.get("type"));
+            if (eventId == null) {
+                log.error("Stripe webhook rejected: missing event id");
+                return "fail";
+            }
+            if (webhookEventRepository.findByEventId(eventId).isPresent()) {
+                log.info("Stripe webhook already processed: {}", eventId);
+                return "ok";
+            }
+
+            if (!"checkout.session.completed".equals(type)) {
+                log.info("Stripe webhook ignored: type={}", type);
+                return "ok";
+            }
+
+            Map<String, Object> data = asMap(event.get("data"));
+            Map<String, Object> session = asMap(data.get("object"));
+            Map<String, Object> metadata = asMap(session.get("metadata"));
+            String orderId = stringValue(metadata.get("order_id"));
+            if (orderId == null) {
+                orderId = stringValue(session.get("client_reference_id"));
+            }
+            if (orderId == null) {
+                log.error("Stripe webhook rejected: missing order_id metadata");
+                return "fail";
+            }
+
+            UUID orderUuid;
+            try {
+                orderUuid = UUID.fromString(orderId);
+            } catch (IllegalArgumentException e) {
+                log.error("Stripe webhook rejected: invalid order_id={}", orderId);
+                return "fail";
+            }
+
+            Order order = orderRepository.findById(orderUuid).orElse(null);
+            if (order == null) {
+                log.warn("Stripe webhook order not found: {}", orderId);
+                return "fail";
+            }
+
+            Long amountTotal = longValue(session.get("amount_total"));
+            String currency = stringValue(session.get("currency"));
+            if (amountTotal == null || currency == null) {
+                log.error("Stripe webhook rejected: missing amount_total/currency, order={}", orderId);
+                return "fail";
+            }
+
+            long expectedAmount = PaymentCurrencyUtils.toStripeMinorUnit(order.getActualAmount(), currency);
+            if (expectedAmount != amountTotal) {
+                log.error("Stripe webhook amount mismatch: expected={}, actual={}, order={}", expectedAmount, amountTotal, orderId);
+                return "fail";
+            }
+            if (!PaymentCurrencyUtils.normalizeCurrency(order.getCurrency()).equals(PaymentCurrencyUtils.normalizeCurrency(currency))) {
+                log.error("Stripe webhook currency mismatch: expected={}, actual={}, order={}", order.getCurrency(), currency, orderId);
+                return "fail";
+            }
+
+            WebhookEvent webhookEvent = new WebhookEvent();
+            webhookEvent.setEventId(eventId);
+            webhookEvent.setChannelCode("stripe");
+            webhookEvent.setOrderId(orderUuid);
+            webhookEvent.setPayload(payload);
+
+            if (order.getStatus() == OrderStatus.PENDING) {
+                order.setStatus(OrderStatus.PAID);
+                order.setPaidAt(LocalDateTime.now());
+                orderRepository.save(order);
+                webhookEvent.setProcessResult("SUCCESS_" + currency.toUpperCase());
+                log.info("Stripe webhook: order {} marked as PAID", orderId);
+            } else {
+                webhookEvent.setProcessResult("SKIPPED_" + order.getStatus().name());
+                log.info("Stripe webhook: order {} already {}", orderId, order.getStatus());
+            }
+
+            webhookEventRepository.save(webhookEvent);
+            return "ok";
+        } catch (Exception e) {
+            log.error("Stripe webhook processing failed: {}", e.getMessage(), e);
+            return "fail";
+        }
+    }
+
+    @Override
+    @Transactional
+    public String processPaypalCallback(String payload, Map<String, String> headers) {
+        PaymentChannel channel = paymentChannelRepository
+                .findFirstByProviderTypeAndEnabledAndIsDeleted("paypal", true, 0)
+                .orElse(null);
+        if (channel == null) {
+            log.error("PayPal webhook rejected: enabled paypal channel not found");
+            return "fail";
+        }
+
+        PaymentServiceImpl paymentServiceImpl = paymentService;
+        PaypalService.PaypalConfig config = paymentServiceImpl.buildPaypalConfig(channel);
+        if (!paypalService.verifyWebhookSignature(config, payload, headers)) {
+            log.error("PayPal webhook signature verification failed");
+            return "fail";
+        }
+
+        try {
+            Map<String, Object> event = objectMapper.readValue(payload, new TypeReference<>() {});
+            String eventId = stringValue(event.get("id"));
+            String eventType = stringValue(event.get("event_type"));
+            if (eventId == null) {
+                log.error("PayPal webhook rejected: missing event id");
+                return "fail";
+            }
+            if (webhookEventRepository.findByEventId(eventId).isPresent()) {
+                log.info("PayPal webhook already processed: {}", eventId);
+                return "ok";
+            }
+
+            WebhookEvent webhookEvent = new WebhookEvent();
+            webhookEvent.setEventId(eventId);
+            webhookEvent.setChannelCode("paypal");
+            webhookEvent.setPayload(payload);
+
+            Map<String, Object> resource = asMap(event.get("resource"));
+            String paypalOrderId = stringValue(resource.get("id"));
+
+            if ("CHECKOUT.ORDER.APPROVED".equals(eventType)) {
+                Map<String, Object> purchaseUnit = firstMap(resource.get("purchase_units"));
+                String orderId = stringValue(purchaseUnit.get("custom_id"));
+                if (orderId == null) {
+                    orderId = stringValue(purchaseUnit.get("invoice_id"));
+                }
+                UUID orderUuid = parseUuid(orderId);
+                if (orderUuid == null) {
+                    log.error("PayPal ORDER.APPROVED missing internal order id");
+                    return "fail";
+                }
+                Order order = orderRepository.findById(orderUuid).orElse(null);
+                if (order == null) {
+                    log.warn("PayPal ORDER.APPROVED order not found: {}", orderId);
+                    return "fail";
+                }
+
+                webhookEvent.setOrderId(orderUuid);
+
+                PaypalService.PaypalCaptureResult captureResult = paypalService.captureOrder(config, paypalOrderId);
+                if (!"COMPLETED".equalsIgnoreCase(captureResult.status())) {
+                    webhookEvent.setProcessResult("CAPTURED_" + captureResult.status());
+                    webhookEventRepository.save(webhookEvent);
+                    log.info("PayPal ORDER.APPROVED capture result: order={}, status={}", orderId, captureResult.status());
+                    return "ok";
+                }
+
+                if (captureResult.amount() == null || captureResult.currency() == null) {
+                    log.error("PayPal capture missing amount or currency: order={}", orderId);
+                    return "fail";
+                }
+                if (order.getActualAmount().compareTo(captureResult.amount()) != 0) {
+                    log.error("PayPal capture amount mismatch: expected={}, actual={}, order={}",
+                            order.getActualAmount(), captureResult.amount(), orderId);
+                    return "fail";
+                }
+                if (!PaymentCurrencyUtils.normalizeCurrency(order.getCurrency()).equals(PaymentCurrencyUtils.normalizeCurrency(captureResult.currency()))) {
+                    log.error("PayPal capture currency mismatch: expected={}, actual={}, order={}",
+                            order.getCurrency(), captureResult.currency(), orderId);
+                    return "fail";
+                }
+
+                if (order.getStatus() == OrderStatus.PENDING) {
+                    order.setStatus(OrderStatus.PAID);
+                    order.setPaidAt(LocalDateTime.now());
+                    orderRepository.save(order);
+                    webhookEvent.setProcessResult("CAPTURED_SUCCESS");
+                    log.info("PayPal ORDER.APPROVED captured and marked PAID: order={}", orderId);
+                } else {
+                    webhookEvent.setProcessResult("SKIPPED_" + order.getStatus().name());
+                    log.info("PayPal ORDER.APPROVED skipped: order={}, status={}", orderId, order.getStatus());
+                }
+
+                webhookEventRepository.save(webhookEvent);
+                return "ok";
+            }
+
+            webhookEvent.setOrderId(parseUuid(stringValue(resource.get("invoice_id"))));
+            webhookEvent.setProcessResult("IGNORED_" + (eventType != null ? eventType : "UNKNOWN"));
+            webhookEventRepository.save(webhookEvent);
+            log.info("PayPal webhook ignored: eventType={}", eventType);
+            return "ok";
+        } catch (Exception e) {
+            log.error("PayPal webhook processing failed: {}", e.getMessage(), e);
+            return "fail";
+        }
+    }
+
     private void saveWebhookEvent(String eventId, String channelCode, UUID orderId,
                                    String payload, String processResult) {
         WebhookEvent event = new WebhookEvent();
@@ -382,6 +760,60 @@ public class WebhookServiceImpl implements WebhookService {
         log.error("Cannot resolve merchant key for order {}: channel config missing 'key' field", orderId);
         throw new BusinessException(ErrorCode.CHANNEL_UNAVAILABLE,
                 "支付渠道配置缺少 key，请在后台「支付渠道管理」中完善配置");
+    }
+
+    private Map<String, String> parseConfigData(String configData) {
+        if (configData == null || configData.isBlank()) return Map.of();
+        try {
+            Map<String, Object> raw = objectMapper.readValue(configData, new TypeReference<>() {});
+            Map<String, String> result = new LinkedHashMap<>();
+            for (var entry : raw.entrySet()) {
+                if (entry.getValue() != null) {
+                    result.put(entry.getKey(), entry.getValue().toString());
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("Failed to parse payment channel config: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    private String stringValue(Object value) {
+        return value != null ? value.toString() : null;
+    }
+
+    private Long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null) return null;
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private UUID parseUuid(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return UUID.fromString(value);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> firstMap(Object value) {
+        if (!(value instanceof java.util.List<?> list) || list.isEmpty()) return Map.of();
+        Object first = list.getFirst();
+        return first instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
     }
 
     /**

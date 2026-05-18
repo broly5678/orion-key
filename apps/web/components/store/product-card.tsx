@@ -1,20 +1,22 @@
 "use client"
 
 import Link from "next/link"
-import { Zap, Package, AlertTriangle } from "lucide-react"
+import { Zap, Package, AlertTriangle, Lock, Mail, Phone, MessageCircleMore } from "lucide-react"
 import type { ProductCard as ProductCardType } from "@/types"
 import { useLocale } from "@/lib/context"
-import { cn, getCurrencySymbol } from "@/lib/utils"
+import { formatStorefrontPrice } from "@/lib/storefront-currency"
+import { cn } from "@/lib/utils"
 
 interface ProductCardProps {
   product: ProductCardType
 }
 
 export function ProductCard({ product }: ProductCardProps) {
-  const { t } = useLocale()
+  const { t, locale } = useLocale()
 
   const inStock = product.stock_available > 0
-  const lowStock = product.stock_available > 0 && product.stock_available <= 10
+  const hideInventory = product.inventory_hidden === true
+  const lowStock = !hideInventory && product.stock_available > 0 && product.stock_available <= 10
 
   const stockBarColor = !inStock
     ? "bg-destructive/70"
@@ -23,6 +25,12 @@ export function ProductCard({ product }: ProductCardProps) {
       : "bg-emerald-500"
 
   const productUrl = `/product/${product.id}`
+  const contactBadge = {
+    EMAIL: { icon: Mail, label: "邮箱取货" },
+    PHONE: { icon: Phone, label: "手机号下单" },
+    QQ: { icon: MessageCircleMore, label: "QQ 下单" },
+    TEXT: { icon: MessageCircleMore, label: "联系方式下单" },
+  }[product.contact_type || "EMAIL"]
 
   return (
     <div className="group/card relative flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card transition-[transform,border-color,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-border hover:shadow-lg hover:shadow-black/5">
@@ -55,11 +63,23 @@ export function ProductCard({ product }: ProductCardProps) {
 
         {/* Tags row */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             {product.delivery_type !== "MANUAL" && (
               <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
                 <Zap className="h-3 w-3" />
                 {t("home.instantDelivery")}
+              </span>
+            )}
+            {product.query_password_enabled !== false && (
+              <span className="inline-flex items-center gap-0.5 rounded bg-sky-100 px-1.5 py-0.5 text-xs font-semibold text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                <Lock className="h-3 w-3" />
+                查询密码
+              </span>
+            )}
+            {contactBadge && (
+              <span className="inline-flex items-center gap-0.5 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                <contactBadge.icon className="h-3 w-3" />
+                {contactBadge.label}
               </span>
             )}
             {lowStock && (
@@ -73,6 +93,11 @@ export function ProductCard({ product }: ProductCardProps) {
                 {t("home.stock")} 0
               </span>
             )}
+            {hideInventory && inStock && (
+              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                库存充足
+              </span>
+            )}
           </div>
           {((product.sales_count ?? 0) + (product.initial_sales ?? 0)) > 0 && (
             <span className="text-xs font-semibold text-muted-foreground dark:text-zinc-400">
@@ -84,11 +109,8 @@ export function ProductCard({ product }: ProductCardProps) {
         {/* Price + Buy Now */}
         <div className="mt-auto flex items-center justify-between border-t border-border/40 pt-2">
           <div className="flex items-baseline gap-0.5">
-            <span className="text-sm font-extrabold text-primary">
-              {getCurrencySymbol(product.currency)}
-            </span>
             <span className="text-xl font-extrabold tracking-tight text-primary">
-              {product.base_price.toFixed(2)}
+              {formatStorefrontPrice(product.base_price, product.currency, locale)}
             </span>
             {product.has_specs && (
               <span className="ml-0.5 text-xs text-muted-foreground">
@@ -112,7 +134,9 @@ export function ProductCard({ product }: ProductCardProps) {
           style={{
             width: !inStock
               ? "0%"
-              : `${Math.min(Math.round((product.stock_available / 50) * 100), 100)}%`,
+              : hideInventory
+                ? "100%"
+                : `${Math.min(Math.round((product.stock_available / 50) * 100), 100)}%`,
           }}
         />
       </div>

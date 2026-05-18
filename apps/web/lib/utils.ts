@@ -23,12 +23,27 @@ export function generateIdempotencyKey(): string {
 
 // Dynamic currency symbol cache (populated from API via initCurrencySymbols)
 let currencySymbolMap: Record<string, string> = {}
+let currencyRateMap: Record<string, number> = {}
 
 export function initCurrencySymbols(currencies: { code: string; symbol: string }[]) {
   currencySymbolMap = {}
   for (const c of currencies) {
     currencySymbolMap[c.code] = c.symbol
   }
+}
+
+export function initCurrencyRates(currencies: { code: string; rate_to_cny?: number }[]) {
+  currencyRateMap = {}
+  for (const c of currencies) {
+    if (typeof c.rate_to_cny === "number" && c.rate_to_cny > 0) {
+      currencyRateMap[c.code] = c.rate_to_cny
+    }
+  }
+}
+
+export function getConfiguredCurrencyRate(currency?: string): number | null {
+  if (!currency) return null
+  return currencyRateMap[currency] ?? null
 }
 
 export function getCurrencySymbol(currency?: string): string {

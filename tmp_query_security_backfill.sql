@@ -1,0 +1,2 @@
+UPDATE products SET minimum_purchase_quantity = COALESCE(minimum_purchase_quantity, 1), maximum_purchase_quantity = COALESCE(maximum_purchase_quantity, 0), maximum_purchase_per_user = COALESCE(maximum_purchase_per_user, 0), contact_type = COALESCE(contact_type, 'EMAIL'), query_password_enabled = COALESCE(query_password_enabled, TRUE), only_for_logged_in_users = COALESCE(only_for_logged_in_users, FALSE), inventory_hidden = COALESCE(inventory_hidden, FALSE);
+UPDATE orders SET contact_type = COALESCE(contact_type, 'EMAIL');

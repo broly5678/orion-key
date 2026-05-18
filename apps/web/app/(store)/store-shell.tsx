@@ -2,32 +2,37 @@
 
 import React, { useState, useEffect, useCallback } from "react"
 import { usePathname } from "next/navigation"
-import { Wrench, Mail, X } from "lucide-react"
+import { Wrench, X } from "lucide-react"
 import ReactMarkdown from "react-markdown"
 import { StoreHeader } from "@/components/layout/store-header"
 import { StoreFooter } from "@/components/layout/store-footer"
+import { ContactLinks } from "@/components/shared/contact-links"
 import { VisitTracker } from "@/components/store/visit-tracker"
 import { Modal } from "@/components/ui/modal"
 import { useSiteConfig, useAuth, useLocale } from "@/lib/context"
+import { localizeSiteConfigValue } from "@/lib/storefront-site-i18n"
 
 function AnnouncementBar() {
+  const { locale } = useLocale()
   const { config } = useSiteConfig()
+  const announcement = localizeSiteConfigValue(config, "announcement", locale)
 
-  if (!config?.announcement_enabled || !config.announcement) return null
+  if (!config?.announcement_enabled || !announcement) return null
 
   return (
     <div className="overflow-hidden bg-primary/10 text-primary">
       <div className="animate-marquee whitespace-nowrap py-1.5 text-xs font-medium sm:text-sm">
-        <span className="mx-8">{config.announcement}</span>
-        <span className="mx-8">{config.announcement}</span>
+        <span className="mx-8">{announcement}</span>
+        <span className="mx-8">{announcement}</span>
       </div>
     </div>
   )
 }
 
 function MaintenancePage() {
-  const { t } = useLocale()
+  const { t, locale } = useLocale()
   const { config } = useSiteConfig()
+  const maintenanceMessage = localizeSiteConfigValue(config, "maintenance_message", locale)
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
@@ -37,17 +42,9 @@ function MaintenancePage() {
         </div>
         <h1 className="mb-3 text-2xl font-bold text-foreground">{t("maintenance.title")}</h1>
         <p className="mb-6 max-w-md text-sm text-muted-foreground">
-          {config?.maintenance_message || t("maintenance.description")}
+          {maintenanceMessage || t("maintenance.description")}
         </p>
-        {config?.contact_email && (
-          <a
-            href={`mailto:${config.contact_email}`}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            <Mail className="h-4 w-4" />
-            {t("maintenance.contactSupport")}
-          </a>
-        )}
+        <ContactLinks />
       </div>
     </div>
   )
@@ -68,18 +65,20 @@ function MaintenanceAdminBanner() {
 const POPUP_DISMISSED_KEY = "popup_dismissed"
 
 function PopupAnnouncement() {
+  const { t, locale } = useLocale()
   const { config } = useSiteConfig()
   const [open, setOpen] = useState(false)
+  const popupContent = localizeSiteConfigValue(config, "popup_content", locale)
 
   useEffect(() => {
     if (
       config?.popup_enabled &&
-      config.popup_content &&
+      popupContent &&
       !sessionStorage.getItem(POPUP_DISMISSED_KEY)
     ) {
       setOpen(true)
     }
-  }, [config?.popup_enabled, config?.popup_content])
+  }, [config?.popup_enabled, popupContent])
 
   const handleClose = useCallback(() => {
     setOpen(false)
@@ -91,7 +90,7 @@ function PopupAnnouncement() {
   return (
     <Modal open={open} onClose={handleClose} className="max-w-lg">
       <div className="flex items-center justify-between border-b border-border px-6 py-4">
-        <h2 className="text-base font-semibold text-foreground">公告</h2>
+        <h2 className="text-base font-semibold text-foreground">{t("site.popupTitle")}</h2>
         <button
           type="button"
           className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
@@ -102,7 +101,7 @@ function PopupAnnouncement() {
       </div>
       <div className="px-6 py-4">
         <div className="prose prose-sm max-w-none text-muted-foreground dark:prose-invert">
-          <ReactMarkdown>{config!.popup_content!}</ReactMarkdown>
+          <ReactMarkdown>{popupContent}</ReactMarkdown>
         </div>
       </div>
       <div className="flex justify-end border-t border-border px-6 py-3">
@@ -111,7 +110,7 @@ function PopupAnnouncement() {
           className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
           onClick={handleClose}
         >
-          我知道了
+          {t("site.popupConfirm")}
         </button>
       </div>
     </Modal>

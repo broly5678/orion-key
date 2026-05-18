@@ -1,17 +1,24 @@
 import { notFound } from "next/navigation"
+import { cookies } from "next/headers"
 import { Package } from "lucide-react"
+import { getDictionary } from "@/lib/i18n"
+import { LOCALE_COOKIE_NAME } from "@/lib/locale-detect"
+import { localizeProductDetail } from "@/lib/storefront-product-i18n"
 import { getProductDetail, getPaymentChannels } from "@/services/api-server"
 import { ProductActions } from "./product-actions"
 import { ProductBreadcrumb } from "./product-breadcrumb"
 import { ProductDescription } from "./product-description"
 import { ScrollToTop } from "./scroll-to-top"
 import type { Metadata } from "next"
+import type { Locale } from "@/lib/i18n"
 import type { PaymentChannelItem } from "@/types"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params
   try {
-    const product = await getProductDetail(id)
+    const cookieStore = await cookies()
+    const locale = ((cookieStore.get(LOCALE_COOKIE_NAME)?.value as Locale | undefined) || "zh")
+    const product = localizeProductDetail(await getProductDetail(id), locale)
     return {
       title: product.title,
       description: product.description || product.title,
@@ -37,13 +44,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
+  const cookieStore = await cookies()
+  const locale = ((cookieStore.get(LOCALE_COOKIE_NAME)?.value as Locale | undefined) || "zh")
 
-  const [product, channels] = await Promise.all([
+  const [rawProduct, channels] = await Promise.all([
     getProductDetail(id).catch(() => null),
     getPaymentChannels().catch(() => [] as PaymentChannelItem[]),
   ])
 
-  if (!product) notFound()
+  if (!rawProduct) notFound()
+  const product = localizeProductDetail(rawProduct, locale)
+  const dict = getDictionary(locale)
 
   const inStock = (product.specs?.[0]?.stock_available ?? product.stock_available ?? 0) > 0
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"
@@ -52,7 +63,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "首页", item: baseUrl },
+      { "@type": "ListItem", position: 1, name: dict["nav.home"], item: baseUrl },
       ...(product.category_name
         ? [{ "@type": "ListItem", position: 2, name: product.category_name }]
         : []),

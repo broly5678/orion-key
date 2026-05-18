@@ -38,7 +38,7 @@ public class EmailServiceImpl implements EmailService {
     @Value("${mail.enabled:false}")
     private boolean mailEnabled;
 
-    @Value("${mail.site-url:https://orionkey.shop}")
+    @Value("${mail.site-url:https://fk.jixianxiake.xyz}")
     private String siteUrl;
 
     @Value("${spring.mail.username:}")
@@ -70,7 +70,7 @@ public class EmailServiceImpl implements EmailService {
 
             String siteName = siteConfigRepository.findByConfigKey("site_name")
                     .map(c -> c.getConfigValue())
-                    .orElse("Orion Key");
+                    .orElse("FK Shop");
 
             String html = buildHtml(order, itemMap, grouped, siteName);
 

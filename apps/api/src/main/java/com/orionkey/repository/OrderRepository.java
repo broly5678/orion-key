@@ -29,6 +29,8 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     List<Order> findByEmailInOrderByCreatedAtDesc(List<String> emails);
 
+    List<Order> findByContactValueInOrderByCreatedAtDesc(List<String> contactValues);
+
     List<Order> findByIdIn(List<UUID> ids);
 
     @Query("SELECT o FROM Order o WHERE o.status = com.orionkey.constant.OrderStatus.PENDING AND o.expiresAt < :now")
@@ -39,6 +41,18 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
     long countByClientIpAndStatus(String clientIp, OrderStatus status);
 
     long countByEmailAndStatus(String email, OrderStatus status);
+
+    @Query("SELECT COALESCE(SUM(oi.quantity), 0) FROM Order o JOIN OrderItem oi ON oi.orderId = o.id " +
+            "WHERE o.userId = :userId AND o.status IN :statuses AND oi.productId = :productId")
+    long sumPurchasedQuantityByUser(@Param("userId") UUID userId,
+                                    @Param("statuses") List<OrderStatus> statuses,
+                                    @Param("productId") UUID productId);
+
+    @Query("SELECT COALESCE(SUM(oi.quantity), 0) FROM Order o JOIN OrderItem oi ON oi.orderId = o.id " +
+            "WHERE o.sessionToken = :sessionToken AND o.status IN :statuses AND oi.productId = :productId")
+    long sumPurchasedQuantityBySession(@Param("sessionToken") String sessionToken,
+                                       @Param("statuses") List<OrderStatus> statuses,
+                                       @Param("productId") UUID productId);
 
     /** 悲观写锁：SELECT ... FOR UPDATE，用于防止并发发货等竞态条件 */
     @Lock(LockModeType.PESSIMISTIC_WRITE)

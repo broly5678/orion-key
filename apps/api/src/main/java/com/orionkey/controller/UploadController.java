@@ -31,6 +31,16 @@ public class UploadController {
             "image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp"
     );
 
+    private static final Set<String> ALLOWED_KEY_EXTENSIONS = Set.of(
+            ".pem", ".key", ".txt"
+    );
+
+    private static final Set<String> ALLOWED_KEY_CONTENT_TYPES = Set.of(
+            "text/plain",
+            "application/x-pem-file",
+            "application/octet-stream"
+    );
+
     /**
      * 文件 Magic Bytes 前缀，用于验证文件真实类型（防止伪造 Content-Type）
      */
@@ -107,6 +117,50 @@ public class UploadController {
         }
     }
 
+    @PostMapping("/payment-key")
+    public ApiResponse<?> uploadPaymentKey(@RequestParam("file") MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文件不能为空");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType != null && !contentType.isBlank() && !ALLOWED_KEY_CONTENT_TYPES.contains(contentType.toLowerCase())) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "私钥文件格式不支持，仅允许 PEM/KEY/TXT 文本文件");
+        }
+
+        String originalFilename = file.getOriginalFilename();
+        String extension = "";
+        if (originalFilename != null && originalFilename.contains(".")) {
+            extension = originalFilename.substring(originalFilename.lastIndexOf(".")).toLowerCase();
+        }
+        if (extension.isEmpty() || !ALLOWED_KEY_EXTENSIONS.contains(extension)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "私钥文件扩展名不支持，仅允许 .pem/.key/.txt");
+        }
+
+        String content;
+        try {
+            content = new String(file.getBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.SERVER_ERROR, "读取私钥文件失败");
+        }
+        if (!looksLikePrivateKey(content)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "文件内容不像有效的私钥 PEM，请上传 apiclient_key.pem 或等效私钥文件");
+        }
+
+        String filename = "wxpay-" + UUID.randomUUID() + extension;
+        try {
+            Path keyDir = resolvedUploadDir.resolve("payment-keys");
+            Files.createDirectories(keyDir);
+            Path target = keyDir.resolve(filename);
+            file.transferTo(target.toFile());
+            log.info("Payment key uploaded: {}", target);
+            return ApiResponse.success(Map.of("path", target.toString().replace('\\', '/')));
+        } catch (IOException e) {
+            log.error("Payment key upload failed", e);
+            throw new BusinessException(ErrorCode.SERVER_ERROR, "私钥文件上传失败");
+        }
+    }
+
     /**
      * 校验文件头部 Magic Bytes 是否与声明的扩展名匹配
      */
@@ -136,5 +190,11 @@ public class UploadController {
             if (data[i] != prefix[i]) return false;
         }
         return true;
+    }
+
+    private boolean looksLikePrivateKey(String content) {
+        String normalized = content.trim();
+        return normalized.contains("-----BEGIN PRIVATE KEY-----")
+                || normalized.contains("-----BEGIN RSA PRIVATE KEY-----");
     }
 }

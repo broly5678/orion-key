@@ -68,9 +68,16 @@ public class OrderController {
         return ApiResponse.success(deliverService.deliverOrders(request));
     }
 
+    @PostMapping("/{id}/unlock")
+    public ApiResponse<?> unlockOrder(@PathVariable UUID id, @RequestBody Map<String, String> request) {
+        return ApiResponse.success(deliverService.unlockOrder(id, request.get("query_password")));
+    }
+
     @GetMapping("/{id}/export")
-    public void exportCardKeys(@PathVariable UUID id, HttpServletResponse response) throws Exception {
-        String content = deliverService.exportCardKeys(id);
+    public void exportCardKeys(@PathVariable UUID id,
+                               @RequestParam("token") String accessToken,
+                               HttpServletResponse response) throws Exception {
+        String content = deliverService.exportCardKeys(id, accessToken);
         response.setContentType("text/plain; charset=UTF-8");
         response.setHeader("Content-Disposition", "attachment; filename=card-keys-" + id + ".txt");
         response.getWriter().write(content);

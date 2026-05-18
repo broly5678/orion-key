@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
-import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, X, AlertCircle, ChevronDown, Shield, Key } from "lucide-react"
+import { useState, useEffect, useMemo, useRef, type ChangeEvent } from "react"
+import { Plus, Edit, Trash2, ToggleLeft, ToggleRight, X, AlertCircle, ChevronDown, Shield, Key, Upload, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useLocale } from "@/lib/context"
 import { toast } from "sonner"
@@ -19,6 +19,9 @@ interface ConfigField {
   label: string
   placeholder: string
   type?: "password" | "text"
+  helperText?: string
+  uploadable?: boolean
+  defaultValue?: string
 }
 
 interface ProviderOption {
@@ -30,7 +33,37 @@ interface ProviderOption {
   configFields: ConfigField[]
 }
 
+const SITE_URL = "https://fk.jixianxiake.xyz"
+
 const PROVIDER_OPTIONS: ProviderOption[] = [
+  {
+    type: "paypal",
+    name: "PayPal Checkout",
+    description: "面向欧美和国际用户的钱包支付，支持 PayPal 账户和部分本地支付体验",
+    channels: [{ code: "paypal", name: "PayPal" }],
+    configFields: [
+      { key: "client_id", label: "Client ID", placeholder: "PayPal REST App Client ID" },
+      { key: "client_secret", label: "Client Secret", placeholder: "PayPal REST App Client Secret", type: "password" },
+      { key: "webhook_id", label: "Webhook ID", placeholder: "PayPal Webhook ID" },
+      { key: "return_url", label: "支付成功跳转地址", placeholder: `例如：${SITE_URL}/order/query`, defaultValue: `${SITE_URL}/order/query` },
+      { key: "cancel_url", label: "支付取消返回地址", placeholder: `例如：${SITE_URL}/order/query`, defaultValue: `${SITE_URL}/order/query` },
+      { key: "currency", label: "默认结算货币", placeholder: "地区无法识别时回退使用，例如：usd" },
+      { key: "environment", label: "环境", placeholder: "sandbox 或 live" },
+    ],
+  },
+  {
+    type: "stripe",
+    name: "Stripe Checkout",
+    description: "面向国际用户的信用卡支付，支持 Visa / Mastercard / Apple Pay / Google Pay",
+    channels: [{ code: "stripe", name: "Credit Card / Stripe" }],
+    configFields: [
+      { key: "secret_key", label: "Secret Key", placeholder: "sk_live_xxx", type: "password" },
+      { key: "webhook_secret", label: "Webhook Secret", placeholder: "whsec_xxx", type: "password" },
+      { key: "success_url", label: "支付成功跳转地址", placeholder: `例如：${SITE_URL}/order/query`, defaultValue: `${SITE_URL}/order/query` },
+      { key: "cancel_url", label: "支付取消返回地址", placeholder: `例如：${SITE_URL}/order/query`, defaultValue: `${SITE_URL}/order/query` },
+      { key: "currency", label: "默认结算货币", placeholder: "地区无法识别时回退使用，例如：usd" },
+    ],
+  },
   {
     type: "epay",
     name: "易支付（聚合支付）",
@@ -43,8 +76,8 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
       { key: "pid", label: "商户ID (PID)", placeholder: "例如：743794" },
       { key: "key", label: "商户密钥 (Key)", placeholder: "MD5 密钥", type: "password" },
       { key: "api_url", label: "API 地址", placeholder: "例如：https://pay.example.com/" },
-      { key: "notify_url", label: "异步回调地址", placeholder: "例如：https://yourdomain.com/api/payments/webhook/epay" },
-      { key: "return_url", label: "同步跳转地址", placeholder: "例如：https://yourdomain.com/order/query" },
+      { key: "notify_url", label: "异步回调地址", placeholder: `例如：${SITE_URL}/api/payments/webhook/epay`, defaultValue: `${SITE_URL}/api/payments/webhook/epay` },
+      { key: "return_url", label: "同步跳转地址", placeholder: `例如：${SITE_URL}/order/query`, defaultValue: `${SITE_URL}/order/query` },
     ],
   },
   {
@@ -56,8 +89,9 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
       { key: "appid", label: "应用 AppID", placeholder: "支付宝开放平台应用 AppID" },
       { key: "private_key", label: "应用私钥", placeholder: "RSA2 私钥", type: "password" },
       { key: "alipay_public_key", label: "支付宝公钥", placeholder: "支付宝平台提供的公钥", type: "password" },
-      { key: "gateway_url", label: "网关地址", placeholder: "https://openapi.alipay.com/gateway.do" },
-      { key: "notify_url", label: "异步回调地址", placeholder: "例如：https://yourdomain.com/api/payments/webhook/alipay" },
+      { key: "gateway_url", label: "网关地址", placeholder: "https://openapi.alipay.com/gateway.do", defaultValue: "https://openapi.alipay.com/gateway.do" },
+      { key: "notify_url", label: "支付宝服务器异步通知地址", placeholder: `例如：${SITE_URL}/api/payments/webhook/alipay`, helperText: "这是支付结果通知地址，不是开放平台里的“授权回调地址”。提交订单时系统也会自动把它带到支付宝请求里。", defaultValue: `${SITE_URL}/api/payments/webhook/alipay` },
+      { key: "return_url", label: "付款后浏览器返回地址（可选）", placeholder: `例如：${SITE_URL}/order/query`, helperText: "这是用户付款完成后浏览器跳回你站点的地址，不是订单结果通知地址。系统会自动附加 orderId 参数。", defaultValue: `${SITE_URL}/order/query` },
     ],
   },
   {
@@ -70,8 +104,8 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
       { key: "mchid", label: "商户号 (MchID)", placeholder: "微信支付商户号" },
       { key: "api_v3_key", label: "APIv3 密钥", placeholder: "微信支付 APIv3 密钥", type: "password" },
       { key: "serial_no", label: "证书序列号", placeholder: "API 证书序列号" },
-      { key: "private_key_path", label: "私钥文件路径", placeholder: "例如：/certs/apiclient_key.pem" },
-      { key: "notify_url", label: "异步回调地址", placeholder: "例如：https://yourdomain.com/api/payments/webhook/wxpay" },
+      { key: "private_key_path", label: "私钥文件路径", placeholder: "例如：/var/lib/orion-key/uploads/payment-keys/xxx.pem", helperText: "可直接点击右侧上传 apiclient_key.pem，系统会自动保存到服务器并回填路径。", uploadable: true },
+      { key: "notify_url", label: "异步回调地址", placeholder: `例如：${SITE_URL}/api/payments/webhook/wxpay`, helperText: "这个地址填到微信支付商户平台的支付结果通知地址。H5 支付完成后系统也会自动带 orderId 返回订单查询页。", defaultValue: `${SITE_URL}/api/payments/webhook/wxpay` },
     ],
   },
   {
@@ -85,8 +119,8 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     configFields: [
       { key: "api_url", label: "BEpusdt 服务地址", placeholder: "例如：http://bepusdt:8080" },
       { key: "api_token", label: "API Token", placeholder: "BEpusdt 管理后台获取", type: "password" },
-      { key: "notify_url", label: "回调通知地址", placeholder: "例如：https://domain.com/api/payments/webhook/usdt" },
-      { key: "redirect_url", label: "支付成功跳转（可选）", placeholder: "例如：https://domain.com/order/query" },
+      { key: "notify_url", label: "回调通知地址", placeholder: `例如：${SITE_URL}/api/payments/webhook/usdt`, defaultValue: `${SITE_URL}/api/payments/webhook/usdt` },
+      { key: "redirect_url", label: "支付成功跳转（可选）", placeholder: `例如：${SITE_URL}/order/query`, defaultValue: `${SITE_URL}/order/query` },
       { key: "trade_type", label: "交易类型", placeholder: "usdt.trc20 或 usdt.bep20" },
       { key: "fiat", label: "法币类型", placeholder: "CNY / USD" },
       { key: "timeout", label: "超时秒数", placeholder: "默认 900" },
@@ -97,6 +131,21 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
 ]
 
 const PROVIDER_MAP = Object.fromEntries(PROVIDER_OPTIONS.map(p => [p.type, p]))
+
+function getDefaultConfig(provider: ProviderOption | null): Record<string, string> {
+  if (!provider) return {}
+  const defaults: Record<string, string> = {}
+  for (const field of provider.configFields) {
+    if (field.defaultValue) {
+      defaults[field.key] = field.defaultValue
+    }
+  }
+  return defaults
+}
+
+function mergeConfigWithDefaults(provider: ProviderOption | null, current: Record<string, string>): Record<string, string> {
+  return { ...getDefaultConfig(provider), ...current }
+}
 
 /** 获取 provider 的显示标签 */
 function getProviderLabel(type: string): string {
@@ -116,6 +165,7 @@ export default function AdminPaymentChannelsPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [showKeys, setShowKeys] = useState(false)
+  const [uploadingKeyField, setUploadingKeyField] = useState<string | null>(null)
 
   // Form state — step 1: provider, step 2: channel, step 3: config
   const [providerDropdownOpen, setProviderDropdownOpen] = useState(false)
@@ -175,9 +225,11 @@ export default function AdminPaymentChannelsPage() {
   useEffect(() => { fetchChannels() }, [])
 
   const handleEdit = (channel: PaymentChannelItem) => {
+    const providerType = channel.provider_type || "epay"
+    const provider = PROVIDER_MAP[providerType] ?? null
     setEditId(channel.id)
     setFormData({
-      provider_type: channel.provider_type || "epay",
+      provider_type: providerType,
       channel_code: channel.channel_code,
       channel_name: channel.channel_name,
       is_enabled: channel.is_enabled,
@@ -189,9 +241,9 @@ export default function AdminPaymentChannelsPage() {
       for (const [k, v] of Object.entries(config)) {
         if (v != null) parsed[k] = String(v)
       }
-      setConfigData(parsed)
+      setConfigData(mergeConfigWithDefaults(provider, parsed))
     } else {
-      setConfigData({})
+      setConfigData(getDefaultConfig(provider))
     }
     setShowKeys(false)
     setShowModal(true)
@@ -225,7 +277,7 @@ export default function AdminPaymentChannelsPage() {
       channel_code: autoChannel?.code ?? "",
       channel_name: autoChannel?.name ?? "",
     }))
-    setConfigData({})
+    setConfigData(getDefaultConfig(provider))
     setProviderDropdownOpen(false)
     setFormErrors(prev => ({ ...prev, provider: false }))
   }
@@ -241,6 +293,22 @@ export default function AdminPaymentChannelsPage() {
 
   const handleConfigChange = (key: string, value: string) => {
     setConfigData(prev => ({ ...prev, [key]: value }))
+  }
+
+  const handlePaymentKeyUpload = async (fieldKey: string, e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingKeyField(fieldKey)
+    try {
+      const result = await adminPaymentApi.uploadPaymentKey(file)
+      setConfigData(prev => ({ ...prev, [fieldKey]: result.path }))
+      toast.success("私钥文件已上传并回填路径")
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "私钥上传失败")
+    } finally {
+      setUploadingKeyField(null)
+      e.target.value = ""
+    }
   }
 
   const handleSave = async () => {
@@ -614,13 +682,30 @@ export default function AdminPaymentChannelsPage() {
               {currentProvider.configFields.map((field) => (
                 <div key={field.key} className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
-                  <input
-                    type={field.type === "password" && !showKeys ? "password" : "text"}
-                    className="h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                    placeholder={field.placeholder}
-                    value={configData[field.key] ?? ""}
-                    onChange={(e) => handleConfigChange(field.key, e.target.value)}
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type={field.type === "password" && !showKeys ? "password" : "text"}
+                      className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                      placeholder={field.placeholder}
+                      value={configData[field.key] ?? ""}
+                      onChange={(e) => handleConfigChange(field.key, e.target.value)}
+                    />
+                    {field.uploadable && (
+                      <label className={cn("flex h-9 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-input bg-background px-3 text-xs font-medium text-foreground hover:bg-accent transition-colors", uploadingKeyField === field.key && "pointer-events-none opacity-50")}>
+                        {uploadingKeyField === field.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                        上传
+                        <input
+                          type="file"
+                          accept=".pem,.key,.txt"
+                          className="hidden"
+                          onChange={(e) => void handlePaymentKeyUpload(field.key, e)}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {field.helperText && (
+                    <p className="text-[11px] leading-4 text-muted-foreground">{field.helperText}</p>
+                  )}
                 </div>
               ))}
             </div>

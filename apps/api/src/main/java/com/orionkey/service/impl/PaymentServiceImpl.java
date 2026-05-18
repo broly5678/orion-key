@@ -16,12 +16,25 @@ import com.orionkey.service.BepusdtService.BepusdtPaymentResult;
 import com.orionkey.service.EpayService;
 import com.orionkey.service.EpayService.ChannelConfig;
 import com.orionkey.service.EpayService.EpayResult;
+import com.orionkey.service.NativeAlipayService;
+import com.orionkey.service.NativeWxpayService;
 import com.orionkey.service.PaymentService;
+import com.orionkey.service.PaypalService;
+import com.orionkey.service.PaypalService.PaypalConfig;
+import com.orionkey.service.PaypalService.PaypalOrderResult;
+import com.orionkey.service.StripeService;
+import com.orionkey.service.StripeService.StripeCheckoutResult;
+import com.orionkey.service.StripeService.StripeConfig;
+import com.orionkey.util.PaymentCurrencyUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,7 +56,13 @@ public class PaymentServiceImpl implements PaymentService {
     private final OrderItemRepository orderItemRepository;
     private final EpayService epayService;
     private final BepusdtService bepusdtService;
+    private final NativeAlipayService nativeAlipayService;
+    private final NativeWxpayService nativeWxpayService;
+    private final PaypalService paypalService;
+    private final StripeService stripeService;
     private final ObjectMapper objectMapper;
+    @Value("${mail.site-url:https://fk.jixianxiake.xyz}")
+    private String siteUrl;
 
     @Override
     public Map<String, Object> createPayment(UUID orderId, String paymentMethod, BigDecimal amount) {
@@ -72,9 +91,11 @@ public class PaymentServiceImpl implements PaymentService {
         String providerType = channel.getProviderType();
         switch (providerType) {
             case "epay" -> createEpayPayment(channel, order, paymentMethod, amount, device);
-            case "native_alipay" -> throw new BusinessException(ErrorCode.CHANNEL_UNAVAILABLE, "原生支付宝支付尚未实现，请使用易支付渠道");
-            case "native_wxpay" -> throw new BusinessException(ErrorCode.CHANNEL_UNAVAILABLE, "原生微信支付尚未实现，请使用易支付渠道");
+            case "native_alipay" -> createNativeAlipayPayment(channel, order, amount);
+            case "native_wxpay" -> createNativeWxpayPayment(channel, order, amount, device);
             case "usdt" -> createBepusdtPayment(channel, order, amount);
+            case "paypal" -> createPaypalPayment(channel, order, amount);
+            case "stripe" -> createStripePayment(channel, order, amount);
             default -> throw new BusinessException(ErrorCode.CHANNEL_UNAVAILABLE, "不支持的支付提供商类型: " + providerType);
         }
 
@@ -85,7 +106,7 @@ public class PaymentServiceImpl implements PaymentService {
      * BEpusdt USDT 下单流程
      */
     private void createBepusdtPayment(PaymentChannel channel, Order order, BigDecimal amount) {
-        BepusdtConfig config = buildBepusdtConfig(channel);
+        BepusdtConfig config = buildBepusdtConfig(channel, order.getCurrency());
         String productName = buildProductName(order.getId());
 
         BepusdtPaymentResult result = bepusdtService.createPayment(
@@ -99,10 +120,82 @@ public class PaymentServiceImpl implements PaymentService {
         orderRepository.save(order);
     }
 
+    private void createStripePayment(PaymentChannel channel, Order order, BigDecimal amount) {
+        StripeConfig config = buildStripeConfig(channel, order.getCurrency());
+        String productName = buildProductName(order.getId());
+        StripeCheckoutResult result = stripeService.createCheckoutSession(
+                config,
+                order.getId().toString(),
+                amount,
+                productName
+        );
+        order.setPaymentUrl(result.checkoutUrl());
+        orderRepository.save(order);
+    }
+
+    private void createPaypalPayment(PaymentChannel channel, Order order, BigDecimal amount) {
+        PaypalConfig config = buildPaypalConfig(channel, order.getCurrency());
+        String productName = buildProductName(order.getId());
+        PaypalOrderResult result = paypalService.createOrder(
+                config,
+                order.getId().toString(),
+                amount,
+                productName
+        );
+        order.setPaymentUrl(result.approveUrl());
+        order.setEpayTradeNo(result.paypalOrderId());
+        orderRepository.save(order);
+    }
+
+    private void createNativeAlipayPayment(PaymentChannel channel, Order order, BigDecimal amount) {
+        if (!"CNY".equalsIgnoreCase(PaymentCurrencyUtils.normalizeCurrency(order.getCurrency()))) {
+            throw new BusinessException(ErrorCode.CHANNEL_UNAVAILABLE, "原生支付宝仅支持人民币订单");
+        }
+
+        NativeAlipayService.NativeAlipayConfig config = buildNativeAlipayConfig(channel, order.getId());
+        String productName = buildProductName(order.getId());
+        NativeAlipayService.NativeAlipayPrecreateResult result =
+                nativeAlipayService.createPrecreateOrder(config, order.getId().toString(), amount, productName);
+
+        order.setQrcodeUrl(result.qrCode());
+        order.setPaymentUrl(siteUrl + "/api/payments/native/alipay/redirect/" + order.getId());
+        orderRepository.save(order);
+    }
+
+    private void createNativeWxpayPayment(PaymentChannel channel, Order order, BigDecimal amount, String device) {
+        if (!"CNY".equalsIgnoreCase(PaymentCurrencyUtils.normalizeCurrency(order.getCurrency()))) {
+            throw new BusinessException(ErrorCode.CHANNEL_UNAVAILABLE, "原生微信支付仅支持人民币订单");
+        }
+
+        NativeWxpayService.NativeWxpayConfig config = buildNativeWxpayConfig(channel);
+        String productName = buildProductName(order.getId());
+        NativeWxpayService.NativeWxpayResult nativeResult =
+                nativeWxpayService.createNativeOrder(config, order.getId().toString(), amount, productName);
+
+        order.setQrcodeUrl(nativeResult.codeUrl());
+        if (device != null && !"pc".equalsIgnoreCase(device) && !"wechat".equalsIgnoreCase(device)) {
+            NativeWxpayService.H5WxpayResult h5Result = nativeWxpayService.createH5Order(
+                    config,
+                    order.getId().toString(),
+                    amount,
+                    productName,
+                    order.getClientIp()
+            );
+            order.setPaymentUrl(appendWxpayRedirectUrl(h5Result.h5Url(), buildOrderQueryReturnUrl(order.getId())));
+        } else {
+            order.setPaymentUrl(null);
+        }
+        orderRepository.save(order);
+    }
+
     /**
      * 从渠道的 config_data JSON 构建 BepusdtConfig。
      */
     public BepusdtConfig buildBepusdtConfig(PaymentChannel channel) {
+        return buildBepusdtConfig(channel, null);
+    }
+
+    public BepusdtConfig buildBepusdtConfig(PaymentChannel channel, String orderCurrency) {
         Map<String, String> cfg = parseConfigData(channel.getConfigData());
 
         String apiUrl = requireConfig(cfg, "api_url", channel.getChannelCode());
@@ -110,12 +203,72 @@ public class PaymentServiceImpl implements PaymentService {
         String notifyUrl = requireConfig(cfg, "notify_url", channel.getChannelCode());
         String redirectUrl = cfg.getOrDefault("redirect_url", "");
         String tradeType = cfg.getOrDefault("trade_type", "usdt.trc20");
-        String fiat = cfg.getOrDefault("fiat", "CNY");
+        String fiat = PaymentCurrencyUtils.normalizeCurrency(cfg.getOrDefault("fiat", orderCurrency != null ? orderCurrency : "CNY"));
         int timeout = Integer.parseInt(cfg.getOrDefault("timeout", "900"));
         String fixedRate = cfg.getOrDefault("fixed_rate", "");
 
         return new BepusdtConfig(apiUrl, apiToken, notifyUrl, redirectUrl,
                 tradeType, fiat, timeout, fixedRate);
+    }
+
+    public StripeConfig buildStripeConfig(PaymentChannel channel) {
+        return buildStripeConfig(channel, null);
+    }
+
+    public StripeConfig buildStripeConfig(PaymentChannel channel, String orderCurrency) {
+        Map<String, String> cfg = parseConfigData(channel.getConfigData());
+
+        String secretKey = requireConfig(cfg, "secret_key", channel.getChannelCode());
+        String webhookSecret = requireConfig(cfg, "webhook_secret", channel.getChannelCode());
+        String successUrl = requireConfig(cfg, "success_url", channel.getChannelCode());
+        String cancelUrl = requireConfig(cfg, "cancel_url", channel.getChannelCode());
+        String currency = PaymentCurrencyUtils.normalizeCurrency(cfg.getOrDefault("currency", orderCurrency != null ? orderCurrency : "USD"));
+
+        return new StripeConfig(secretKey, webhookSecret, successUrl, cancelUrl, currency);
+    }
+
+    public PaypalConfig buildPaypalConfig(PaymentChannel channel) {
+        return buildPaypalConfig(channel, null);
+    }
+
+    public PaypalConfig buildPaypalConfig(PaymentChannel channel, String orderCurrency) {
+        Map<String, String> cfg = parseConfigData(channel.getConfigData());
+
+        String clientId = requireConfig(cfg, "client_id", channel.getChannelCode());
+        String clientSecret = requireConfig(cfg, "client_secret", channel.getChannelCode());
+        String webhookId = requireConfig(cfg, "webhook_id", channel.getChannelCode());
+        String returnUrl = requireConfig(cfg, "return_url", channel.getChannelCode());
+        String cancelUrl = requireConfig(cfg, "cancel_url", channel.getChannelCode());
+        String currency = PaymentCurrencyUtils.normalizeCurrency(cfg.getOrDefault("currency", orderCurrency != null ? orderCurrency : "USD"));
+        String environment = cfg.getOrDefault("environment", "sandbox");
+
+        return new PaypalConfig(clientId, clientSecret, webhookId, returnUrl, cancelUrl, currency, environment);
+    }
+
+    public NativeAlipayService.NativeAlipayConfig buildNativeAlipayConfig(PaymentChannel channel) {
+        return buildNativeAlipayConfig(channel, null);
+    }
+
+    public NativeAlipayService.NativeAlipayConfig buildNativeAlipayConfig(PaymentChannel channel, UUID orderId) {
+        Map<String, String> cfg = parseConfigData(channel.getConfigData());
+        String appId = requireConfig(cfg, "appid", channel.getChannelCode());
+        String privateKey = requireConfig(cfg, "private_key", channel.getChannelCode());
+        String alipayPublicKey = requireConfig(cfg, "alipay_public_key", channel.getChannelCode());
+        String gatewayUrl = cfg.getOrDefault("gateway_url", "https://openapi.alipay.com/gateway.do");
+        String notifyUrl = cfg.getOrDefault("notify_url", siteUrl + "/api/payments/webhook/alipay");
+        String returnUrl = buildConfiguredReturnUrl(cfg.get("return_url"), orderId);
+        return new NativeAlipayService.NativeAlipayConfig(appId, privateKey, alipayPublicKey, gatewayUrl, notifyUrl, returnUrl);
+    }
+
+    public NativeWxpayService.NativeWxpayConfig buildNativeWxpayConfig(PaymentChannel channel) {
+        Map<String, String> cfg = parseConfigData(channel.getConfigData());
+        String appId = requireConfig(cfg, "appid", channel.getChannelCode());
+        String mchId = requireConfig(cfg, "mchid", channel.getChannelCode());
+        String apiV3Key = requireConfig(cfg, "api_v3_key", channel.getChannelCode());
+        String serialNo = requireConfig(cfg, "serial_no", channel.getChannelCode());
+        String privateKeyPath = requireConfig(cfg, "private_key_path", channel.getChannelCode());
+        String notifyUrl = cfg.getOrDefault("notify_url", siteUrl + "/api/payments/webhook/wxpay");
+        return new NativeWxpayService.NativeWxpayConfig(appId, mchId, apiV3Key, serialNo, privateKeyPath, notifyUrl);
     }
 
     /**
@@ -172,22 +325,50 @@ public class PaymentServiceImpl implements PaymentService {
         result.put("qrcode_url", order.getQrcodeUrl());
         result.put("pay_url", order.getPaymentUrl());
         result.put("expires_at", order.getExpiresAt());
+        result.put("amount", order.getActualAmount());
+        result.put("currency", order.getCurrency());
 
         // USDT 支付额外字段
         if (order.getUsdtWalletAddress() != null) {
             result.put("wallet_address", order.getUsdtWalletAddress());
             result.put("crypto_amount", order.getUsdtCryptoAmount());
             result.put("chain", order.getUsdtChain());
+            result.put("crypto_currency", "USDT");
         }
         return result;
     }
 
     private String buildProductName(UUID orderId) {
         List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
-        if (items.isEmpty()) return "Orion Key 订单";
+        if (items.isEmpty()) return "FK Shop 订单";
         String firstName = items.getFirst().getProductTitle();
         if (items.size() == 1) return firstName;
         return firstName + " 等" + items.size() + "件商品";
+    }
+
+    private String buildConfiguredReturnUrl(String configuredReturnUrl, UUID orderId) {
+        String baseUrl = (configuredReturnUrl == null || configuredReturnUrl.isBlank())
+                ? siteUrl + "/order/query"
+                : configuredReturnUrl;
+        if (orderId == null) {
+            return baseUrl;
+        }
+        return UriComponentsBuilder.fromUriString(baseUrl)
+                .replaceQueryParam("orderId", orderId)
+                .build(true)
+                .toUriString();
+    }
+
+    private String buildOrderQueryReturnUrl(UUID orderId) {
+        return UriComponentsBuilder.fromUriString(siteUrl + "/order/query")
+                .replaceQueryParam("orderId", orderId)
+                .build(true)
+                .toUriString();
+    }
+
+    private String appendWxpayRedirectUrl(String h5Url, String redirectUrl) {
+        String encodedRedirectUrl = URLEncoder.encode(redirectUrl, StandardCharsets.UTF_8);
+        return h5Url + (h5Url.contains("?") ? "&" : "?") + "redirect_url=" + encodedRedirectUrl;
     }
 
     private Map<String, String> parseConfigData(String configData) {

@@ -18,6 +18,11 @@ export function ThemeScript() {
 (function(){
   try {
     var d = document.documentElement;
+    function getCookie(name) {
+      var escapedName = name.replace(/[-/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
+      var matched = document.cookie.match(new RegExp('(?:^|; )' + escapedName + '=([^;]*)'));
+      return matched ? decodeURIComponent(matched[1]) : null;
+    }
     
     // 1. 主题模式（dark / light / system）
     var theme = localStorage.getItem('theme') || 'system';
@@ -33,8 +38,8 @@ export function ThemeScript() {
     d.setAttribute('data-color', colorScheme);
     
     // 3. 语言设置（zh / en）
-    var locale = localStorage.getItem('locale') || 'zh';
-    d.setAttribute('lang', locale === 'en' ? 'en' : 'zh');
+    var locale = localStorage.getItem('locale') || getCookie('locale') || 'zh';
+    d.setAttribute('lang', locale);
   } catch(e) {
     // 静默失败，使用默认值
   }

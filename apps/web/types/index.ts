@@ -93,6 +93,14 @@ export interface ProductCard {
   stock_available: number
   has_specs: boolean
   delivery_type?: string
+  contact_type?: "EMAIL" | "PHONE" | "QQ" | "TEXT"
+  query_password_enabled?: boolean
+  leave_message?: string
+  minimum_purchase_quantity?: number
+  maximum_purchase_quantity?: number
+  maximum_purchase_per_user?: number
+  only_for_logged_in_users?: boolean
+  inventory_hidden?: boolean
   sales_count?: number
   initial_sales?: number
   is_enabled?: boolean
@@ -128,6 +136,14 @@ export interface CartItem {
   quantity: number
   subtotal: number
   stock_available?: number
+  delivery_type?: string
+  contact_type?: "EMAIL" | "PHONE" | "QQ" | "TEXT"
+  query_password_enabled?: boolean
+  leave_message?: string
+  minimum_purchase_quantity?: number
+  maximum_purchase_quantity?: number
+  maximum_purchase_per_user?: number
+  inventory_hidden?: boolean
 }
 
 export interface Cart {
@@ -147,10 +163,14 @@ export interface OrderBrief {
   id: string
   total_amount: number
   actual_amount: number
+  currency?: string
   status: OrderStatus
   order_type: OrderType
   payment_method: string
   created_at: string
+  contact_type?: string
+  contact_value?: string
+  has_query_password?: boolean
   // USDT 支付字段（仅 USDT 订单返回）
   usdt_tx_id?: string
   // TXID 审核状态（仅 USDT 订单且有审核记录时返回）
@@ -166,10 +186,11 @@ export interface OrderItemDetail {
   quantity: number
   unit_price: number
   subtotal: number
+  currency?: string
 }
 
 export interface OrderDetail extends OrderBrief {
-  email: string
+  email: string | null
   points_deducted: number
   points_discount: number
   expires_at: string
@@ -184,10 +205,13 @@ export interface PaymentCreateResult {
   qrcode_url?: string
   pay_url?: string
   expires_at: string
+  amount?: number
+  currency?: string
   // USDT 新增（仅 USDT 渠道返回）
   wallet_address?: string
   crypto_amount?: string
   chain?: string
+  crypto_currency?: string
 }
 
 export interface TxidVerifyResult {
@@ -210,23 +234,33 @@ export interface DeliverResult {
   order_id: string
   status: OrderStatus
   groups: DeliverResultGroup[]
+  access_token?: string
+  access_expires_at?: string
+  leave_message?: string
 }
+
+export type UnlockOrderResult = DeliverResult
 
 // ============================================================
 // Currency
 // ============================================================
 
 export interface CurrencyItem {
+  id?: string
   code: string
   name: string
   symbol: string
+  rate_to_cny?: number
+  is_enabled?: boolean
+  sort_order?: number
+  created_at?: string
 }
 
 // ============================================================
 // Payment
 // ============================================================
 
-export type ProviderType = 'epay' | 'native_alipay' | 'native_wxpay' | 'usdt'
+export type ProviderType = 'epay' | 'native_alipay' | 'native_wxpay' | 'usdt' | 'stripe' | 'paypal'
 
 export interface PaymentChannelConfig {
   // 易支付
@@ -248,6 +282,16 @@ export interface PaymentChannelConfig {
   // USDT
   wallet_address?: string
   rate_api_url?: string
+  secret_key?: string
+  publishable_key?: string
+  webhook_secret?: string
+  success_url?: string
+  cancel_url?: string
+  currency?: string
+  client_id?: string
+  client_secret?: string
+  webhook_id?: string
+  environment?: string
   [key: string]: string | undefined
 }
 
@@ -276,9 +320,24 @@ export interface SiteConfig {
   announcement?: string
   popup_enabled: boolean
   popup_content?: string
+  contact_email_enabled?: boolean
   contact_email?: string
+  contact_qq_enabled?: boolean
+  contact_qq?: string
+  contact_qq_group_enabled?: boolean
+  contact_qq_group?: string
+  contact_wechat_enabled?: boolean
+  contact_wechat?: string
+  contact_wechat_group_enabled?: boolean
+  contact_wechat_group?: string
+  contact_telegram_enabled?: boolean
   contact_telegram?: string
+  contact_telegram_group_enabled?: boolean
   contact_telegram_group?: string
+  contact_whatsapp_enabled?: boolean
+  contact_whatsapp?: string
+  contact_x_enabled?: boolean
+  contact_x?: string
   points_enabled: boolean
   points_rate: number
   maintenance_enabled: boolean
@@ -303,7 +362,10 @@ export interface CreateOrderRequest {
   spec_id: string | null
   quantity: number
   email: string
+  contact_value?: string
+  query_password?: string
   payment_method: string
+  locale?: string
   use_points?: boolean
   idempotency_key: string
   device?: string
@@ -311,7 +373,9 @@ export interface CreateOrderRequest {
 
 export interface CreateCartOrderRequest {
   email: string
+  query_password?: string
   payment_method: string
+  locale?: string
   use_points?: boolean
   idempotency_key: string
   device?: string

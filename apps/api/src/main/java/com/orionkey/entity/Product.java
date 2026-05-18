@@ -40,6 +40,30 @@ public class Product extends BaseEntity {
     @Column(length = 10)
     private String deliveryType = "AUTO";
 
+    @Column(length = 20)
+    private String contactType = "EMAIL";
+
+    @Column(name = "query_password_enabled", nullable = false)
+    private boolean queryPasswordEnabled = true;
+
+    @Column(columnDefinition = "TEXT")
+    private String leaveMessage;
+
+    @Column(name = "minimum_purchase_quantity")
+    private int minimumPurchaseQuantity = 1;
+
+    @Column(name = "maximum_purchase_quantity")
+    private int maximumPurchaseQuantity = 0;
+
+    @Column(name = "maximum_purchase_per_user")
+    private int maximumPurchasePerUser = 0;
+
+    @Column(name = "only_for_logged_in_users", nullable = false)
+    private boolean onlyForLoggedInUsers = false;
+
+    @Column(name = "inventory_hidden", nullable = false)
+    private boolean inventoryHidden = false;
+
     private int lowStockThreshold = 10;
 
     private boolean wholesaleEnabled = false;

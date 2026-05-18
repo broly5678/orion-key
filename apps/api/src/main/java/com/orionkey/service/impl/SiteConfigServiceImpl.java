@@ -26,7 +26,16 @@ public class SiteConfigServiceImpl implements SiteConfigService {
     private static final List<String> PUBLIC_KEYS = List.of(
             "site_name", "site_slogan", "site_description", "logo_url", "favicon_url",
             "announcement_enabled", "announcement", "popup_enabled", "popup_content",
-            "contact_email", "contact_telegram", "contact_telegram_group", "points_enabled", "points_rate",
+            "contact_email_enabled", "contact_email",
+            "contact_qq_enabled", "contact_qq",
+            "contact_qq_group_enabled", "contact_qq_group",
+            "contact_wechat_enabled", "contact_wechat",
+            "contact_wechat_group_enabled", "contact_wechat_group",
+            "contact_telegram_enabled", "contact_telegram",
+            "contact_telegram_group_enabled", "contact_telegram_group",
+            "contact_whatsapp_enabled", "contact_whatsapp",
+            "contact_x_enabled", "contact_x",
+            "points_enabled", "points_rate",
             "maintenance_enabled", "maintenance_message", "footer_text", "github_url", "custom_css"
     );
 
@@ -37,7 +46,15 @@ public class SiteConfigServiceImpl implements SiteConfigService {
             // 公告 / 弹窗
             "announcement_enabled", "announcement", "popup_enabled", "popup_content",
             // 联系方式
-            "contact_email", "contact_telegram", "contact_telegram_group",
+            "contact_email_enabled", "contact_email",
+            "contact_qq_enabled", "contact_qq",
+            "contact_qq_group_enabled", "contact_qq_group",
+            "contact_wechat_enabled", "contact_wechat",
+            "contact_wechat_group_enabled", "contact_wechat_group",
+            "contact_telegram_enabled", "contact_telegram",
+            "contact_telegram_group_enabled", "contact_telegram_group",
+            "contact_whatsapp_enabled", "contact_whatsapp",
+            "contact_x_enabled", "contact_x",
             // 积分
             "points_enabled", "points_rate",
             // 维护模式
@@ -122,6 +139,7 @@ public class SiteConfigServiceImpl implements SiteConfigService {
                     .orElseGet(() -> {
                         SiteConfig c = new SiteConfig();
                         c.setConfigKey(key);
+                        c.setConfigGroup(inferConfigGroup(key));
                         return c;
                     });
             config.setConfigValue(value);
@@ -154,5 +172,14 @@ public class SiteConfigServiceImpl implements SiteConfigService {
         // 移除危险 CSS 模式
         css = CSS_DANGEROUS_PATTERNS.matcher(css).replaceAll("/* blocked */");
         return css;
+    }
+
+    private String inferConfigGroup(String key) {
+        if (key == null || key.isBlank()) return "site";
+        if (key.startsWith("contact_")) return "contact";
+        if (key.startsWith("announcement_") || key.startsWith("popup_")) return "announcement";
+        if (key.startsWith("maintenance_")) return "maintenance";
+        if (key.startsWith("points_")) return "points";
+        return "site";
     }
 }

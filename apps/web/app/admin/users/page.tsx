@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Search, UserCheck, UserX, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react"
+import { Search, UserCheck, UserX, ChevronLeft, ChevronRight, KeyRound } from "lucide-react"
+import { ResetPasswordModal } from "@/components/admin/reset-password-modal"
 import { cn } from "@/lib/utils"
 import { useLocale } from "@/lib/context"
 import { toast } from "sonner"
@@ -16,8 +17,10 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUserItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [savingPassword, setSavingPassword] = useState(false)
   const [search, setSearch] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
+  const [passwordTarget, setPasswordTarget] = useState<AdminUserItem | null>(null)
 
   const [debouncedSearch, setDebouncedSearch] = useState("")
 
@@ -75,8 +78,33 @@ export default function AdminUsersPage() {
     }
   }
 
+  const handleResetPassword = async (newPassword: string) => {
+    if (!passwordTarget) return
+    setSavingPassword(true)
+    try {
+      await withMockFallback(
+        () => adminUserApi.resetPassword(passwordTarget.id, newPassword),
+        () => null
+      )
+      toast.success(t("admin.passwordResetSuccess"))
+      setPasswordTarget(null)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : t("admin.passwordResetFailed"))
+    } finally {
+      setSavingPassword(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
+      <ResetPasswordModal
+        open={passwordTarget != null}
+        username={passwordTarget?.username ?? ""}
+        saving={savingPassword}
+        onClose={() => setPasswordTarget(null)}
+        onConfirm={handleResetPassword}
+      />
+
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">{t("admin.users")}</h1>
@@ -148,7 +176,15 @@ export default function AdminUsersPage() {
                       {new Date(user.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/10"
+                          onClick={() => setPasswordTarget(user)}
+                        >
+                          <KeyRound className="h-3.5 w-3.5" />
+                          {t("admin.resetPassword")}
+                        </button>
                         <button
                           type="button"
                           className={cn(

@@ -223,6 +223,16 @@ public class CartServiceImpl implements CartService {
         map.put("unit_price", unitPrice);
         map.put("quantity", item.getQuantity());
         map.put("subtotal", unitPrice.multiply(BigDecimal.valueOf(item.getQuantity())));
+        if (product != null) {
+            map.put("delivery_type", product.getDeliveryType());
+            map.put("contact_type", product.getContactType());
+            map.put("query_password_enabled", product.isQueryPasswordEnabled());
+            map.put("leave_message", product.getLeaveMessage());
+            map.put("minimum_purchase_quantity", product.getMinimumPurchaseQuantity());
+            map.put("maximum_purchase_quantity", product.getMaximumPurchaseQuantity());
+            map.put("maximum_purchase_per_user", product.getMaximumPurchasePerUser());
+            map.put("inventory_hidden", product.isInventoryHidden());
+        }
 
         long stockAvailable = item.getSpecId() != null
                 ? cardKeyRepository.countByProductIdAndSpecIdAndStatus(item.getProductId(), item.getSpecId(), CardKeyStatus.AVAILABLE)

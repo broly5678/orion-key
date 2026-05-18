@@ -1,6 +1,9 @@
 "use client"
 
-import { useLocale, useSiteConfig } from "@/lib/context"
+import { useSiteConfig } from "@/lib/context"
+import { useLocale } from "@/lib/context"
+import { ContactLinks } from "@/components/shared/contact-links"
+import { localizeSiteConfigValue } from "@/lib/storefront-site-i18n"
 
 function GithubIcon({ className }: { className?: string }) {
   return (
@@ -11,20 +14,16 @@ function GithubIcon({ className }: { className?: string }) {
 }
 
 export function StoreFooter() {
-  const { t } = useLocale()
+  const { locale } = useLocale()
   const { config } = useSiteConfig()
 
   return (
     <footer className="border-t border-border bg-muted/40">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-center gap-4 px-4 lg:px-6">
-        <p className="text-sm text-muted-foreground">
-          {config?.footer_text}
+      <div className="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center justify-center gap-3 px-4 py-3 lg:px-6">
+        <p className="text-sm text-muted-foreground text-center">
+          {localizeSiteConfigValue(config, "footer_text", locale)}
         </p>
-        {config?.contact_email && (
-          <a href={`mailto:${config.contact_email}`} className="text-xs text-muted-foreground hover:text-foreground">
-            {config.contact_email}
-          </a>
-        )}
+        <ContactLinks itemClassName="bg-transparent text-xs" contentMode="value" />
         {config?.github_url && (
           <a
             href={config.github_url}

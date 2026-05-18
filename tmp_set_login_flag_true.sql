@@ -1,0 +1,1 @@
+UPDATE products SET only_for_logged_in_users = true WHERE id = '7f2b6384-fba0-4b60-8b20-c52c1b01ba2c';

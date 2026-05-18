@@ -103,10 +103,14 @@ public class UserServiceImpl implements UserService {
         map.put("id", o.getId());
         map.put("total_amount", o.getTotalAmount());
         map.put("actual_amount", o.getActualAmount());
+        map.put("currency", o.getCurrency());
         map.put("status", o.getStatus().name());
         map.put("order_type", o.getOrderType().name());
         map.put("payment_method", o.getPaymentMethod());
         map.put("created_at", o.getCreatedAt());
+        map.put("contact_type", o.getContactType());
+        map.put("contact_value", o.getContactValue());
+        map.put("has_query_password", o.getQueryPasswordHash() != null && !o.getQueryPasswordHash().isBlank());
         return map;
     }
 }

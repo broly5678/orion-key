@@ -10,6 +10,7 @@ import com.orionkey.service.DeliverService;
 import com.orionkey.service.EmailService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -24,14 +25,18 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DeliverServiceImpl implements DeliverService {
 
+    private static final int PUBLIC_QUERY_WINDOW_DAYS = 30;
+
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
     private final CardKeyRepository cardKeyRepository;
+    private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final PointsLogRepository pointsLogRepository;
     private final SiteConfigRepository siteConfigRepository;
     private final UnmatchedTransactionRepository unmatchedTransactionRepository;
     private final EmailService emailService;
+    private final PasswordEncoder passwordEncoder;
 
     @Override
     @SuppressWarnings("unchecked")
@@ -50,11 +55,24 @@ public class DeliverServiceImpl implements DeliverService {
             emailOrders.forEach(o -> orderIds.add(o.getId()));
         }
 
+        List<String> contactValues = (List<String>) request.get("contact_values");
+        if (contactValues != null && !contactValues.isEmpty()) {
+            List<Order> contactOrders = orderRepository.findByContactValueInOrderByCreatedAtDesc(contactValues);
+            contactOrders.forEach(o -> orderIds.add(o.getId()));
+        }
+
         if (orderIds.isEmpty()) {
             throw new BusinessException(ErrorCode.ORDER_NOT_FOUND, "订单不存在");
         }
 
         List<Order> orders = orderRepository.findByIdIn(new ArrayList<>(orderIds));
+        LocalDateTime queryCutoff = LocalDateTime.now().minusDays(PUBLIC_QUERY_WINDOW_DAYS);
+        orders = new ArrayList<>(orders.stream()
+                .filter(o -> o.getCreatedAt() != null && !o.getCreatedAt().isBefore(queryCutoff))
+                .toList());
+        if (orders.isEmpty()) {
+            throw new BusinessException(ErrorCode.ORDER_NOT_FOUND, "仅支持查询最近 " + PUBLIC_QUERY_WINDOW_DAYS + " 天内的订单");
+        }
 
         // 主动过期检查：PENDING 且已超时的订单标记为 EXPIRED（与 getOrderStatus 逻辑一致）
         LocalDateTime now = LocalDateTime.now();
@@ -73,10 +91,14 @@ public class DeliverServiceImpl implements DeliverService {
             map.put("id", o.getId());
             map.put("total_amount", o.getTotalAmount());
             map.put("actual_amount", o.getActualAmount());
+            map.put("currency", o.getCurrency());
             map.put("status", o.getStatus().name());
             map.put("order_type", o.getOrderType().name());
             map.put("payment_method", o.getPaymentMethod());
             map.put("created_at", o.getCreatedAt());
+            map.put("contact_type", o.getContactType());
+            map.put("contact_value", o.getContactValue());
+            map.put("has_query_password", o.getQueryPasswordHash() != null && !o.getQueryPasswordHash().isBlank());
             // USDT 订单：附带 TXID 审核状态（供用户查询页展示审核结果反馈）
             if (o.getPaymentMethod() != null && o.getPaymentMethod().startsWith("usdt_")) {
                 map.put("usdt_tx_id", o.getUsdtTxId());
@@ -109,6 +131,33 @@ public class DeliverServiceImpl implements DeliverService {
             results.add(deliverSingleOrder(orderId));
         }
         return results;
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> unlockOrder(UUID orderId, String queryPassword) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ORDER_NOT_FOUND, "订单不存在"));
+        validateQueryPassword(order, queryPassword);
+
+        Map<String, Object> result = deliverSingleOrder(orderId);
+        Order refreshed = orderRepository.findById(orderId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ORDER_NOT_FOUND, "订单不存在"));
+
+        String accessToken = UUID.randomUUID().toString().replace("-", "");
+        LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(10);
+        refreshed.setQueryAccessToken(accessToken);
+        refreshed.setQueryAccessExpiresAt(expiresAt);
+        orderRepository.save(refreshed);
+
+        result.put("access_token", accessToken);
+        result.put("access_expires_at", expiresAt);
+        List<OrderItem> items = orderItemRepository.findByOrderId(orderId);
+        if (!items.isEmpty()) {
+            Product product = findFirstProduct(items.get(0).getProductId());
+            result.put("leave_message", product != null ? product.getLeaveMessage() : null);
+        }
+        return result;
     }
 
     private Map<String, Object> deliverSingleOrder(UUID orderId) {
@@ -192,9 +241,10 @@ public class DeliverServiceImpl implements DeliverService {
     }
 
     @Override
-    public String exportCardKeys(UUID orderId) {
+    public String exportCardKeys(UUID orderId, String accessToken) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ORDER_NOT_FOUND, "订单不存在"));
+        validateAccessToken(order, accessToken);
         if (order.getStatus() != OrderStatus.DELIVERED) {
             throw new BusinessException(ErrorCode.ORDER_NOT_PAID, "订单未发货");
         }
@@ -278,5 +328,29 @@ public class DeliverServiceImpl implements DeliverService {
         log.setReason("购物奖励积分");
         log.setOrderId(order.getId());
         pointsLogRepository.save(log);
+    }
+
+    private void validateQueryPassword(Order order, String queryPassword) {
+        String hash = order.getQueryPasswordHash();
+        if (hash == null || hash.isBlank()) {
+            return;
+        }
+        if (queryPassword == null || queryPassword.isBlank() || !passwordEncoder.matches(queryPassword, hash)) {
+            throw new BusinessException(ErrorCode.ORDER_QUERY_PASSWORD_INVALID, "查询密码错误");
+        }
+    }
+
+    private void validateAccessToken(Order order, String accessToken) {
+        if (accessToken == null || accessToken.isBlank()
+                || order.getQueryAccessToken() == null
+                || !accessToken.equals(order.getQueryAccessToken())
+                || order.getQueryAccessExpiresAt() == null
+                || order.getQueryAccessExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new BusinessException(ErrorCode.ORDER_QUERY_TOKEN_INVALID, "订单访问凭证无效或已过期");
+        }
+    }
+
+    private Product findFirstProduct(UUID productId) {
+        return productId == null ? null : productRepository.findById(productId).orElse(null);
     }
 }

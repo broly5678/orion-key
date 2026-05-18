@@ -10,5 +10,7 @@ public interface DeliverService {
 
     List<?> deliverOrders(Map<String, Object> request);
 
-    String exportCardKeys(UUID orderId);
+    Map<String, Object> unlockOrder(UUID orderId, String queryPassword);
+
+    String exportCardKeys(UUID orderId, String accessToken);
 }

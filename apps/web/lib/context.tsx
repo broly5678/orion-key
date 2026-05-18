@@ -2,10 +2,11 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from "react"
 import { type Locale, getDictionary, type TranslationKey } from "./i18n"
+import { getLocaleFromCookieString, LOCALE_COOKIE_NAME } from "./locale-detect"
 import type { UserProfile, CartItem, SiteConfig } from "@/types"
 import { clearToken, clearSessionToken, cartApi, siteApi, currencyApi, withMockFallback } from "@/services/api"
 import { mockCartData, mockSiteConfig } from "./mock-data"
-import { initCurrencySymbols } from "./utils"
+import { initCurrencyRates, initCurrencySymbols } from "./utils"
 
 // ============================================================
 // Theme
@@ -281,14 +282,15 @@ export function AppProviders({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("zh")
 
   useEffect(() => {
-    const saved = (localStorage.getItem("locale") as Locale) || "zh"
+    const saved = (localStorage.getItem("locale") as Locale) || getLocaleFromCookieString(document.cookie) || "zh"
     setLocaleState(saved)
   }, [])
 
   const setLocale = useCallback((l: Locale) => {
     setLocaleState(l)
     localStorage.setItem("locale", l)
-    document.documentElement.setAttribute("lang", l === "en" ? "en" : "zh")
+    document.cookie = `${LOCALE_COOKIE_NAME}=${l}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`
+    document.documentElement.setAttribute("lang", l)
   }, [])
 
   const t = useCallback(
@@ -441,10 +443,11 @@ export function AppProviders({ children }: { children: ReactNode }) {
             { code: "USD", name: "美元", symbol: "$" },
             { code: "USDT", name: "USDT (TRC-20)", symbol: "₮" },
           ]
-        )
-        if (!cancelled) {
-          initCurrencySymbols(currencies)
-        }
+          )
+          if (!cancelled) {
+            initCurrencySymbols(currencies)
+            initCurrencyRates(currencies)
+          }
       } catch {
         // fallback symbols are already hardcoded in getCurrencySymbol
       }

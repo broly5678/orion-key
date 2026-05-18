@@ -1,0 +1,11 @@
+{
+  "product_id": "56a9323c-3681-40c3-8b72-0a3184cef023",
+  "spec_id": null,
+  "quantity": 1,
+  "email": "testpay_20260517d@example.com",
+  "payment_method": "alipay",
+  "locale": "zh-CN",
+  "use_points": false,
+  "idempotency_key": "codex-test-alipay-20260517-4",
+  "device": "pc"
+}

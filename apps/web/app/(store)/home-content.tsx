@@ -9,6 +9,7 @@ import {
   ShieldCheck,
 } from "lucide-react"
 import { useLocale, useSearch, useSiteConfig } from "@/lib/context"
+import { ContactLinks } from "@/components/shared/contact-links"
 import { ProductCard } from "@/components/store/product-card"
 import { cn } from "@/lib/utils"
 import type { ProductCard as ProductCardType, Category } from "@/types"
@@ -18,6 +19,12 @@ interface HomeContentProps {
   categories: Category[]
   siteSlogan: string
   siteDescription: string
+}
+
+function getTelegramGroupHref(value: string) {
+  if (/^https?:\/\//i.test(value)) return value
+  if (value.startsWith("@")) return `https://t.me/${value.slice(1)}`
+  return value
 }
 
 export function HomeContent({ products, categories, siteSlogan, siteDescription }: HomeContentProps) {
@@ -90,9 +97,9 @@ export function HomeContent({ products, categories, siteSlogan, siteDescription 
           <p className="mt-3 text-sm text-muted-foreground">
             {siteDescription}
           </p>
-          {config?.contact_telegram_group && (
+          {config?.contact_telegram_group_enabled && config?.contact_telegram_group && (
             <a
-              href={config.contact_telegram_group}
+              href={getTelegramGroupHref(config.contact_telegram_group)}
               target="_blank"
               rel="noopener noreferrer"
               className="tg-ghost-btn mt-6 inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-bold text-[#2AABEE] transition-all active:scale-[0.97]"
@@ -101,6 +108,7 @@ export function HomeContent({ products, categories, siteSlogan, siteDescription 
               <span>{t("home.joinTelegram")}</span>
             </a>
           )}
+          <ContactLinks className="mt-4" />
         </div>
       </section>
 

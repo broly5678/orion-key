@@ -53,7 +53,6 @@ public class ProductServiceImpl implements ProductService {
                 .filter(p -> p.getIsDeleted() == 0 && p.isEnabled())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND, "商品不存在或已下架"));
         Map<String, Object> detail = toProductDetail(product);
-        // 前台公开接口：多规格未启用时隐藏规格信息，防止泄露未启用的规格数据
         if (!product.isSpecEnabled()) {
             detail.put("specs", List.of());
         }
@@ -107,6 +106,14 @@ public class ProductServiceImpl implements ProductService {
         product.setBasePrice(new BigDecimal(req.get("base_price").toString()));
         if (req.containsKey("currency")) product.setCurrency((String) req.get("currency"));
         if (req.containsKey("delivery_type")) product.setDeliveryType((String) req.get("delivery_type"));
+        if (req.containsKey("contact_type")) product.setContactType((String) req.get("contact_type"));
+        if (req.containsKey("query_password_enabled")) product.setQueryPasswordEnabled((boolean) req.get("query_password_enabled"));
+        if (req.containsKey("leave_message")) product.setLeaveMessage((String) req.get("leave_message"));
+        if (req.containsKey("minimum_purchase_quantity")) product.setMinimumPurchaseQuantity(((Number) req.get("minimum_purchase_quantity")).intValue());
+        if (req.containsKey("maximum_purchase_quantity")) product.setMaximumPurchaseQuantity(((Number) req.get("maximum_purchase_quantity")).intValue());
+        if (req.containsKey("maximum_purchase_per_user")) product.setMaximumPurchasePerUser(((Number) req.get("maximum_purchase_per_user")).intValue());
+        if (req.containsKey("only_for_logged_in_users")) product.setOnlyForLoggedInUsers((boolean) req.get("only_for_logged_in_users"));
+        if (req.containsKey("inventory_hidden")) product.setInventoryHidden((boolean) req.get("inventory_hidden"));
         product.setCategoryId(UUID.fromString((String) req.get("category_id")));
         if (req.containsKey("low_stock_threshold")) product.setLowStockThreshold(((Number) req.get("low_stock_threshold")).intValue());
         if (req.containsKey("wholesale_enabled")) product.setWholesaleEnabled((boolean) req.get("wholesale_enabled"));
@@ -131,6 +138,14 @@ public class ProductServiceImpl implements ProductService {
         if (req.containsKey("base_price")) product.setBasePrice(new BigDecimal(req.get("base_price").toString()));
         if (req.containsKey("currency")) product.setCurrency((String) req.get("currency"));
         if (req.containsKey("delivery_type")) product.setDeliveryType((String) req.get("delivery_type"));
+        if (req.containsKey("contact_type")) product.setContactType((String) req.get("contact_type"));
+        if (req.containsKey("query_password_enabled")) product.setQueryPasswordEnabled((boolean) req.get("query_password_enabled"));
+        if (req.containsKey("leave_message")) product.setLeaveMessage((String) req.get("leave_message"));
+        if (req.containsKey("minimum_purchase_quantity")) product.setMinimumPurchaseQuantity(((Number) req.get("minimum_purchase_quantity")).intValue());
+        if (req.containsKey("maximum_purchase_quantity")) product.setMaximumPurchaseQuantity(((Number) req.get("maximum_purchase_quantity")).intValue());
+        if (req.containsKey("maximum_purchase_per_user")) product.setMaximumPurchasePerUser(((Number) req.get("maximum_purchase_per_user")).intValue());
+        if (req.containsKey("only_for_logged_in_users")) product.setOnlyForLoggedInUsers((boolean) req.get("only_for_logged_in_users"));
+        if (req.containsKey("inventory_hidden")) product.setInventoryHidden((boolean) req.get("inventory_hidden"));
         if (req.containsKey("category_id")) product.setCategoryId(UUID.fromString((String) req.get("category_id")));
         if (req.containsKey("low_stock_threshold")) product.setLowStockThreshold(((Number) req.get("low_stock_threshold")).intValue());
         if (req.containsKey("wholesale_enabled")) product.setWholesaleEnabled((boolean) req.get("wholesale_enabled"));
@@ -205,7 +220,6 @@ public class ProductServiceImpl implements ProductService {
                 .filter(s -> s.getProductId().equals(productId))
                 .orElseThrow(() -> new BusinessException(ErrorCode.SPEC_NOT_FOUND, "规格不存在"));
 
-        // 自动作废该规格下的可用卡密（AVAILABLE → INVALID），避免留下永远无法售出的幽灵库存
         cardKeyRepository.updateStatusByProductIdAndSpecId(
                 productId, specId, CardKeyStatus.AVAILABLE, CardKeyStatus.INVALID);
 
@@ -266,17 +280,23 @@ public class ProductServiceImpl implements ProductService {
         boolean hasSpecs = p.isSpecEnabled() && !specs.isEmpty();
         long stockAvailable;
         if (hasSpecs) {
-            // 多规格模式：按各规格分别统计可用库存求和（精确隔离，不含默认库存池和已删除规格的卡密）
             stockAvailable = specs.stream()
                     .mapToLong(s -> cardKeyRepository.countByProductIdAndSpecIdAndStatus(p.getId(), s.getId(), CardKeyStatus.AVAILABLE))
                     .sum();
         } else {
-            // 无规格模式：仅统计 spec_id=null 的卡密
             stockAvailable = cardKeyRepository.countByProductIdAndSpecIdIsNullAndStatus(p.getId(), CardKeyStatus.AVAILABLE);
         }
         map.put("stock_available", stockAvailable);
         map.put("has_specs", hasSpecs);
         map.put("delivery_type", p.getDeliveryType());
+        map.put("contact_type", p.getContactType());
+        map.put("query_password_enabled", p.isQueryPasswordEnabled());
+        map.put("leave_message", p.getLeaveMessage());
+        map.put("minimum_purchase_quantity", p.getMinimumPurchaseQuantity());
+        map.put("maximum_purchase_quantity", p.getMaximumPurchaseQuantity());
+        map.put("maximum_purchase_per_user", p.getMaximumPurchasePerUser());
+        map.put("only_for_logged_in_users", p.isOnlyForLoggedInUsers());
+        map.put("inventory_hidden", p.isInventoryHidden());
         map.put("sales_count", orderItemRepository.sumQuantityByProductId(p.getId()));
         map.put("initial_sales", p.getInitialSales());
         map.put("created_at", p.getCreatedAt());
@@ -306,7 +326,6 @@ public class ProductServiceImpl implements ProductService {
         map.put("name", s.getName());
         map.put("price", s.getPrice());
         map.put("stock_available", getStockAvailable(s.getProductId(), s.getId()));
-        // 有效卡密数量（AVAILABLE/SOLD/LOCKED），用于前端判断删除规格时是否需要确认
         map.put("card_key_count", cardKeyRepository.countByProductIdAndSpecIdExcludingStatus(
                 s.getProductId(), s.getId(), CardKeyStatus.INVALID));
         return map;

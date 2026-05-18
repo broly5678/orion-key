@@ -42,11 +42,13 @@ public class MaintenanceFilter implements Filter {
         // Skip endpoints required for maintenance mode to function correctly:
         // - /api/admin/*        : admin backend must remain accessible
         // - /api/payments/webhook: payment callbacks must not be blocked
+        // - /api/payments/native : 原生支付跳转页必须可访问，否则用户无法拉起支付宝
         // - /api/site/config    : frontend needs real config to detect maintenance mode
         // - /api/auth/*         : login/token check needed so admin can log in and be identified
         // - /api/captcha/*      : login may require captcha verification
         if (path.startsWith("/api/admin")
                 || path.startsWith("/api/payments/webhook")
+                || path.startsWith("/api/payments/native")
                 || path.equals("/api/site/config")
                 || path.startsWith("/api/auth/")
                 || path.startsWith("/api/captcha")) {

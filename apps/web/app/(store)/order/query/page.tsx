@@ -3,14 +3,17 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { Search, Copy, Download, FileText, CheckCircle2, X, Clock, HelpCircle, ExternalLink, Loader2, AlertCircle, Info } from "lucide-react"
+import { Search, Copy, Download, FileText, CheckCircle2, X, Clock, HelpCircle, Loader2, AlertCircle, Info, Lock, KeyRound } from "lucide-react"
 import { toast } from "sonner"
 import { useLocale, useSiteConfig } from "@/lib/context"
 import type { TranslationKey } from "@/lib/i18n"
 import { orderApi, withMockFallback, getApiErrorMessage } from "@/services/api"
-import { mockQueryOrders, mockDeliver } from "@/lib/mock-data"
+import { mockQueryOrders } from "@/lib/mock-data"
+import { ContactLinks } from "@/components/shared/contact-links"
 import { OrderStatusBadge } from "@/components/shared/order-status-badge"
 import { PaymentIcon, getPaymentLabel } from "@/components/shared/payment-icon"
+import { formatExactCurrency } from "@/lib/storefront-currency"
+import { localizeDeliverResult } from "@/lib/storefront-product-i18n"
 import type { OrderBrief, DeliverResult, TxidVerifyResult } from "@/types"
 import { cn, stripInvisible } from "@/lib/utils"
 import { Modal } from "@/components/ui/modal"
@@ -18,6 +21,19 @@ import { Modal } from "@/components/ui/modal"
 interface RecentQuery {
   value: string
   timestamp: number
+}
+
+function getContactTypeLabel(contactType?: string) {
+  switch (contactType) {
+    case "PHONE":
+      return "手机号"
+    case "QQ":
+      return "QQ"
+    case "TEXT":
+      return "联系方式"
+    default:
+      return "邮箱"
+  }
 }
 
 /** 将后端返回的 TXID 验证错误码转为 i18n 翻译文本 */
@@ -37,7 +53,7 @@ function formatTxidReason(reason: string, t: (key: TranslationKey) => string): s
 }
 
 export default function OrderQueryPage() {
-  const { t } = useLocale()
+  const { t, locale } = useLocale()
   const { config } = useSiteConfig()
   const searchParams = useSearchParams()
   const [queryValue, setQueryValue] = useState("")
@@ -47,6 +63,9 @@ export default function OrderQueryPage() {
   const [searched, setSearched] = useState(false)
   const [recentQueries, setRecentQueries] = useState<RecentQuery[]>([])
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [unlockOrderId, setUnlockOrderId] = useState<string | null>(null)
+  const [unlockPassword, setUnlockPassword] = useState("")
+  const [unlockingOrderId, setUnlockingOrderId] = useState<string | null>(null)
   const initRef = useRef(false)
 
   // USDT TXID submission state
@@ -90,37 +109,24 @@ export default function OrderQueryPage() {
     setDeliverResults([])
 
     try {
-      // Determine if input is email or order ID
       const isEmail = trimmed.includes("@")
+      const isUuid = /^[0-9a-fA-F-]{36}$/.test(trimmed)
       const queryParams = isEmail
         ? { emails: [trimmed] }
-        : { order_ids: [trimmed] }
+        : isUuid
+          ? { order_ids: [trimmed] }
+          : { contact_values: [trimmed] }
 
       const found = await withMockFallback(
         () => orderApi.query(queryParams),
         () => mockQueryOrders(queryParams)
       )
 
-      // Auto-deliver: PAID 触发发货分配卡密，DELIVERED 幂等返回已分配卡密
-      let finalOrders = found
-      let finalDeliver: Awaited<ReturnType<typeof orderApi.deliver>> = []
-      const deliverableIds = found.filter(o => o.status === "PAID" || o.status === "DELIVERED").map(o => o.id)
-      if (deliverableIds.length > 0) {
-        finalDeliver = await withMockFallback(
-          () => orderApi.deliver({ order_ids: deliverableIds }),
-          () => mockDeliver(deliverableIds)
-        )
-        // deliver 可能将 PAID 变为 DELIVERED，同步更新状态
-        const statusMap = new Map(finalDeliver.map(d => [d.order_id, d.status]))
-        finalOrders = found.map(o => {
-          const newStatus = statusMap.get(o.id)
-          return newStatus && newStatus !== o.status ? { ...o, status: newStatus } : o
-        })
-      }
-
       // 所有数据就绪后一次性渲染，避免中间态抖动
-      setOrders(finalOrders)
-      setDeliverResults(finalDeliver)
+      setOrders(found)
+      setDeliverResults([])
+      setUnlockOrderId(null)
+      setUnlockPassword("")
 
       // Save to recent queries
       if (found.length > 0) {
@@ -172,6 +178,25 @@ export default function OrderQueryPage() {
     return deliverResults.find(d => d.order_id === orderId)
   }
 
+  const handleUnlock = useCallback(async (orderId: string, password: string) => {
+    setUnlockingOrderId(orderId)
+    try {
+      const result = await orderApi.unlock(orderId, password)
+      setDeliverResults(prev => {
+        const next = prev.filter(item => item.order_id !== orderId)
+        next.push(result)
+        return next
+      })
+      setOrders(prev => prev.map(order => order.id === orderId ? { ...order, status: result.status } : order))
+      setUnlockOrderId(null)
+      setUnlockPassword("")
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, t))
+    } finally {
+      setUnlockingOrderId(null)
+    }
+  }, [t])
+
   const copyToClipboard = (text: string) => {
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(text).then(
@@ -195,24 +220,18 @@ export default function OrderQueryPage() {
   }
 
   const copyAllKeys = (deliver: DeliverResult) => {
-    const allKeys = deliver.groups.flatMap(g => g.card_keys).join("\n")
+    const localizedDeliver = localizeDeliverResult(deliver, locale)
+    const allKeys = localizedDeliver.groups.flatMap(g => g.card_keys).join("\n")
     copyToClipboard(allKeys)
   }
 
   const downloadKeys = (deliver: DeliverResult) => {
-    const lines: string[] = []
-    deliver.groups.forEach(g => {
-      lines.push(`--- ${g.product_title}${g.spec_name ? ` (${g.spec_name})` : ""} ---`)
-      g.card_keys.forEach(k => lines.push(k))
-      lines.push("")
-    })
-    const blob = new Blob([lines.join("\n")], { type: "text/plain" })
-    const url = URL.createObjectURL(blob)
+    if (!deliver.access_token) return
+    const url = orderApi.exportKeysUrl(deliver.order_id, deliver.access_token)
     const a = document.createElement("a")
     a.href = url
     a.download = `order-${deliver.order_id.slice(0, 8)}-keys.txt`
     a.click()
-    URL.revokeObjectURL(url)
   }
 
   const handleTxidSubmit = useCallback(async (orderId: string) => {
@@ -278,6 +297,12 @@ export default function OrderQueryPage() {
             {t("order.search")}
           </button>
         </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          可输入订单号、邮箱、手机号、QQ 或下单时填写的联系方式查询。若订单启用了查询密码，支付完成后仍需再输入一次密码才能查看卡密。
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          为降低撞库和批量探测风险，公开查单仅支持最近 30 天内的订单。
+        </p>
       </div>
 
       {/* Results — 有查询结果时优先展示在最近订单上方 */}
@@ -296,6 +321,7 @@ export default function OrderQueryPage() {
 
       {orders.map((order) => {
         const deliver = getDeliverForOrder(order.id)
+        const localizedDeliver = deliver ? localizeDeliverResult(deliver, locale) : null
         return (
           <div key={order.id} className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
             {/* Order Header */}
@@ -329,7 +355,7 @@ export default function OrderQueryPage() {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t("order.amount")}</span>
                 <span className="font-bold text-foreground">
-                  {"\u00A5"}{order.actual_amount.toFixed(2)}
+                  {formatExactCurrency(order.actual_amount, order.currency || "CNY", locale)}
                 </span>
               </div>
               {/* 支付方式行 */}
@@ -348,6 +374,12 @@ export default function OrderQueryPage() {
                   {new Date(order.created_at).toLocaleString()}
                 </span>
               </div>
+              {order.contact_value && (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">{getContactTypeLabel(order.contact_type)}</span>
+                  <span className="text-right text-foreground">{order.contact_value}</span>
+                </div>
+              )}
               {/* USDT 交易哈希（已支付/已发货时显示） */}
               {order.payment_method?.startsWith("usdt_") && order.usdt_tx_id && (
                 <div className="flex justify-between">
@@ -428,7 +460,7 @@ export default function OrderQueryPage() {
                     </p>
                     <input
                       type="text"
-                      placeholder="0x... / 64-char hex"
+                      placeholder={t("order.usdt.txidPlaceholder")}
                       value={txidInput}
                       onChange={(e) => setTxidInput(e.target.value)}
                       className="h-10 w-full rounded-lg border border-input bg-background px-3 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -483,8 +515,61 @@ export default function OrderQueryPage() {
               </div>
             )}
 
+            {(order.status === "PAID" || order.status === "DELIVERED") && !localizedDeliver && (
+              <div className="rounded-lg border border-border bg-muted/30 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-2">
+                    <Lock className="mt-0.5 h-4 w-4 text-primary" />
+                    <div className="text-sm">
+                      <p className="font-medium text-foreground">
+                        {order.has_query_password ? "请输入查询密码后查看卡密" : "点击查看卡密"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {order.has_query_password ? "该订单已启用查询密码保护。" : "该订单未启用查询密码，查看后将生成短时下载凭证。"}
+                      </p>
+                    </div>
+                  </div>
+                  {!order.has_query_password && (
+                    <button
+                      type="button"
+                      onClick={() => handleUnlock(order.id, "")}
+                      disabled={unlockingOrderId === order.id}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {unlockingOrderId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                      查看卡密
+                    </button>
+                  )}
+                </div>
+                {order.has_query_password && (
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="password"
+                      value={unlockOrderId === order.id ? unlockPassword : ""}
+                      onFocus={() => setUnlockOrderId(order.id)}
+                      onChange={(e) => {
+                        setUnlockOrderId(order.id)
+                        setUnlockPassword(e.target.value)
+                      }}
+                      placeholder="请输入下单时设置的查询密码"
+                      className="h-10 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleUnlock(order.id, unlockOrderId === order.id ? unlockPassword : "")}
+                      disabled={unlockingOrderId === order.id}
+                      className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      {unlockingOrderId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                      解锁
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Card Keys */}
-            {deliver && deliver.groups.length > 0 && (
+            {localizedDeliver && localizedDeliver.groups.length > 0 && (
               <>
                 <hr className="border-border" />
                 <div>
@@ -495,14 +580,15 @@ export default function OrderQueryPage() {
                     </h3>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => copyAllKeys(deliver)}
+                        onClick={() => copyAllKeys(localizedDeliver)}
                         className="inline-flex h-7 items-center gap-1 rounded border border-border px-2 text-xs text-foreground transition-colors hover:bg-accent"
                       >
                         <Copy className="h-3 w-3" />
                         {t("order.copyAll")}
                       </button>
                       <button
-                        onClick={() => downloadKeys(deliver)}
+                        onClick={() => downloadKeys(localizedDeliver)}
+                        disabled={!localizedDeliver.access_token}
                         className="inline-flex h-7 items-center gap-1 rounded border border-border px-2 text-xs text-foreground transition-colors hover:bg-accent"
                       >
                         <Download className="h-3 w-3" />
@@ -510,7 +596,12 @@ export default function OrderQueryPage() {
                       </button>
                     </div>
                   </div>
-                  {deliver.groups.map((group, gIdx) => (
+                  {localizedDeliver.leave_message && (
+                    <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                      {localizedDeliver.leave_message}
+                    </div>
+                  )}
+                  {localizedDeliver.groups.map((group, gIdx) => (
                     <div key={gIdx} className="mb-2">
                       <p className="mb-1 text-sm font-medium text-muted-foreground">
                         {group.product_title}{group.spec_name ? ` - ${group.spec_name}` : ""}
@@ -584,32 +675,21 @@ export default function OrderQueryPage() {
       )}
 
       {/* Help — 联系客服提示（始终在页面底部） */}
-      {(config?.contact_telegram || config?.contact_email) && (
+      {(
+        (config?.contact_email_enabled && config?.contact_email) ||
+        (config?.contact_qq_enabled && config?.contact_qq) ||
+        (config?.contact_qq_group_enabled && config?.contact_qq_group) ||
+        (config?.contact_wechat_enabled && config?.contact_wechat) ||
+        (config?.contact_wechat_group_enabled && config?.contact_wechat_group) ||
+        (config?.contact_telegram_enabled && config?.contact_telegram) ||
+        (config?.contact_telegram_group_enabled && config?.contact_telegram_group) ||
+        (config?.contact_whatsapp_enabled && config?.contact_whatsapp) ||
+        (config?.contact_x_enabled && config?.contact_x)
+      ) && (
         <div className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-muted-foreground">
           <HelpCircle className="h-3.5 w-3.5" />
           <span>{t("order.needHelp")}</span>
-          {config.contact_telegram && (
-            <a
-              href={config.contact_telegram}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-0.5 underline-offset-4 transition-colors hover:text-foreground hover:underline"
-            >
-              {t("order.contactTelegram")}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
-          {config.contact_telegram && config.contact_email && (
-            <span>·</span>
-          )}
-          {config.contact_email && (
-            <a
-              href={`mailto:${config.contact_email}`}
-              className="underline-offset-4 transition-colors hover:text-foreground hover:underline"
-            >
-              {t("order.contactEmail")}
-            </a>
-          )}
+          <ContactLinks itemClassName="border-0 bg-transparent px-1.5 py-0 text-sm underline-offset-4 hover:underline" contentMode="value" />
         </div>
       )}
 

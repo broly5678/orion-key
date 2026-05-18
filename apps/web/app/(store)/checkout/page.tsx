@@ -2,23 +2,30 @@
 
 import { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { ShoppingBag, Mail, CreditCard, Lock } from "lucide-react"
+import { ShoppingBag, Mail, CreditCard, Lock, AlertTriangle, Package } from "lucide-react"
 import { toast } from "sonner"
 import { useLocale, useCart } from "@/lib/context"
+import { formatPaymentSettlementPrice } from "@/lib/storefront-currency"
+import { localizeCartItem } from "@/lib/storefront-product-i18n"
 import { orderApi, paymentApi, withMockFallback, getApiErrorMessage } from "@/services/api"
 import { mockPaymentChannels, mockCreateOrder } from "@/lib/mock-data"
-import { validateEmail, generateIdempotencyKey, getCurrencySymbol, detectPaymentDevice, isMobileDevice } from "@/lib/utils"
+import { validateEmail, generateIdempotencyKey, detectPaymentDevice, isMobileDevice } from "@/lib/utils"
 import { PaymentSelector } from "@/components/shared/payment-selector"
+import { ContactPanel } from "@/components/shared/contact-panel"
 import { Turnstile, useTurnstile } from "@/components/shared/turnstile"
 import { setTurnstileHeaders } from "@/services/api"
 import type { PaymentChannelItem } from "@/types"
 
 export default function CheckoutPage() {
-  const { t } = useLocale()
+  const { t, locale } = useLocale()
   const router = useRouter()
-  const { items, totalAmount, itemCount, refreshCart } = useCart()
+  const { items, totalAmount, refreshCart } = useCart()
+  const localizedItems = items.map((item) => localizeCartItem(item, locale))
+  const cartSupportsCheckout = localizedItems.every((item) => (item.contact_type || "EMAIL") === "EMAIL")
+  const requiresQueryPassword = localizedItems.some((item) => item.query_password_enabled !== false)
 
   const [email, setEmail] = useState("")
+  const [queryPassword, setQueryPassword] = useState("")
   const [channels, setChannels] = useState<PaymentChannelItem[]>([])
   const [selectedPayment, setSelectedPayment] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -47,7 +54,7 @@ export default function CheckoutPage() {
     }
     fetchChannels()
     return () => { cancelled = true }
-  }, [])
+  }, [locale])
 
   const handleConfirmOrder = async () => {
     if (!email.trim()) {
@@ -64,6 +71,14 @@ export default function CheckoutPage() {
       toast.error(t("product.paymentMethod"))
       return
     }
+    if (!cartSupportsCheckout) {
+      toast.error("购物车仅支持邮箱型商品结算，请返回商品页直接购买对应商品")
+      return
+    }
+    if (requiresQueryPassword && queryPassword.trim().length < 6) {
+      toast.error("请设置至少 6 位查询密码")
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -72,7 +87,9 @@ export default function CheckoutPage() {
       const result = await withMockFallback(
         () => orderApi.createFromCart({
           email,
+          query_password: queryPassword,
           payment_method: selectedPayment,
+          locale,
           idempotency_key: generateIdempotencyKey(),
           device,
         }),
@@ -121,22 +138,64 @@ export default function CheckoutPage() {
         <div className="rounded-lg border border-border bg-background p-6">
           <h2 className="mb-4 text-base font-semibold text-foreground">{t("checkout.summary")}</h2>
           <div className="space-y-3">
-            {items.map((item) => (
-              <div key={item.id} className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">
-                  {item.product_title}
-                  {item.spec_name ? ` (${item.spec_name})` : ""}
-                  {" x"}{item.quantity}
-                </span>
-                <span className="font-medium text-foreground">{getCurrencySymbol(item.currency)}{item.subtotal.toFixed(2)}</span>
+            {localizedItems.map((item) => (
+              <div key={item.id} className="rounded-lg border border-border/60 p-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    {item.product_title}
+                    {item.spec_name ? ` (${item.spec_name})` : ""}
+                    {" x"}{item.quantity}
+                  </span>
+                  <span className="font-medium text-foreground">{formatPaymentSettlementPrice(item.subtotal, item.currency, selectedPayment, locale)}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    {(item.contact_type || "EMAIL") === "EMAIL" ? "邮箱取货" : "需直接购买"}
+                  </span>
+                  {item.query_password_enabled !== false && (
+                    <span className="rounded bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                      需查询密码
+                    </span>
+                  )}
+                  {item.maximum_purchase_quantity && item.maximum_purchase_quantity > 0 && (
+                    <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                      单次最多 {item.maximum_purchase_quantity} 件
+                    </span>
+                  )}
+                  {item.maximum_purchase_per_user && item.maximum_purchase_per_user > 0 && (
+                    <span className="rounded bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">
+                      累计限购 {item.maximum_purchase_per_user} 件
+                    </span>
+                  )}
+                </div>
+                {item.leave_message && (
+                  <p className="mt-2 text-xs text-muted-foreground">{item.leave_message}</p>
+                )}
               </div>
             ))}
             <div className="flex items-center justify-between border-t border-border pt-3">
               <span className="text-base font-medium text-foreground">{t("checkout.totalAmount")}</span>
               <span className="text-2xl font-bold text-primary">
-                {getCurrencySymbol(items[0]?.currency)}{totalAmount.toFixed(2)}
+                {formatPaymentSettlementPrice(totalAmount, localizedItems[0]?.currency, selectedPayment, locale)}
               </span>
             </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/30 p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Package className="h-4 w-4 text-primary" />
+            <p className="text-sm font-medium text-foreground">本次订单规则</p>
+          </div>
+          <div className="space-y-1 text-xs text-muted-foreground">
+            <p>购物车结算仅支持邮箱型商品，支付成功后将通过邮箱或查单页取货。</p>
+            {requiresQueryPassword && <p>本次订单包含启用查询密码的商品，结算时必须设置至少 6 位查询密码。</p>}
+            {!cartSupportsCheckout && (
+              <p className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                当前购物车包含非邮箱型商品，请返回商品页直接购买对应商品。
+              </p>
+            )}
           </div>
         </div>
 
@@ -161,6 +220,23 @@ export default function CheckoutPage() {
           </p>
         </div>
 
+        <div className="rounded-lg border border-border bg-background p-6">
+          <div className="mb-4 flex items-center gap-2">
+            <Lock className="h-5 w-5 text-primary" />
+            <h2 className="text-base font-semibold text-foreground">查询密码</h2>
+          </div>
+          <input
+            type="password"
+            value={queryPassword}
+            onChange={(e) => setQueryPassword(e.target.value)}
+            placeholder="如商品启用了查询密码，请填写至少 6 位"
+            className="mb-2 w-full rounded-lg border border-input bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          <p className="text-xs text-muted-foreground">
+            {requiresQueryPassword ? "本次订单支付完成后，查单时还需再次输入该密码才能查看发卡信息。" : "如果后续商品启用了查询密码，支付完成后查单时会再次要求输入。"}
+          </p>
+        </div>
+
         {/* Payment method */}
         <div className="rounded-lg border border-border bg-background p-6">
           <div className="mb-4 flex items-center gap-2">
@@ -173,6 +249,7 @@ export default function CheckoutPage() {
             channels={channels}
             selected={selectedPayment}
             onSelect={setSelectedPayment}
+            preferredCode={channels[0]?.channel_code}
           />
           {selectedPayment.startsWith("usdt_") && (
             <p className="mt-2 text-xs text-muted-foreground">
@@ -190,12 +267,14 @@ export default function CheckoutPage() {
           </div>
         </div>
 
+        <ContactPanel />
+
         <Turnstile onSuccess={setTurnstileToken} onError={handleTurnstileReset} className="mb-4" />
 
         {/* Confirm button */}
         <button
           onClick={handleConfirmOrder}
-          disabled={submitting || items.length === 0}
+          disabled={submitting || items.length === 0 || !cartSupportsCheckout}
           className="scheme-glow w-full rounded-lg bg-primary py-3.5 text-base font-semibold text-primary-foreground transition-all hover:brightness-110 disabled:pointer-events-none disabled:opacity-50"
         >
           {submitting ? (
@@ -204,7 +283,7 @@ export default function CheckoutPage() {
               {t("checkout.processingOrder")}
             </span>
           ) : (
-            <>{t("checkout.confirmOrder")} {getCurrencySymbol(items[0]?.currency)}{totalAmount.toFixed(2)}</>
+            <>{t("checkout.confirmOrder")} {formatPaymentSettlementPrice(totalAmount, localizedItems[0]?.currency, selectedPayment, locale)}</>
           )}
         </button>
       </div>

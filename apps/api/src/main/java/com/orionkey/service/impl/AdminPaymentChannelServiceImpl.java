@@ -70,7 +70,7 @@ public class AdminPaymentChannelServiceImpl implements AdminPaymentChannelServic
 
     /** 需要在 API 响应中脱敏的敏感字段名 */
     private static final Set<String> SENSITIVE_KEYS = Set.of(
-            "api_token", "key", "secret", "password", "private_key"
+            "api_token", "key", "secret", "password", "private_key", "secret_key", "webhook_secret", "client_secret"
     );
 
     private Map<String, Object> toMap(PaymentChannel c) {

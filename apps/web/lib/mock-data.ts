@@ -451,7 +451,9 @@ export const mockOperationLogs: OperationLog[] = [
 export const mockPaymentChannels: PaymentChannelItem[] = [
   { id: uuid(851), channel_code: "wechat", channel_name: "微信支付", provider_type: "epay", config_data: null, is_enabled: true, sort_order: 1, created_at: "2025-01-01T00:00:00Z" },
   { id: uuid(852), channel_code: "alipay", channel_name: "支付宝", provider_type: "epay", config_data: null, is_enabled: true, sort_order: 2, created_at: "2025-01-01T00:00:00Z" },
-  { id: uuid(853), channel_code: "usdt_trc20", channel_name: "USDT (TRC20)", provider_type: "usdt", config_data: null, is_enabled: false, sort_order: 3, created_at: "2025-01-01T00:00:00Z" },
+  { id: uuid(853), channel_code: "stripe", channel_name: "Credit Card", provider_type: "stripe", config_data: null, is_enabled: true, sort_order: 3, created_at: "2025-01-01T00:00:00Z" },
+  { id: uuid(854), channel_code: "paypal", channel_name: "PayPal", provider_type: "paypal", config_data: null, is_enabled: true, sort_order: 4, created_at: "2025-01-01T00:00:00Z" },
+  { id: uuid(855), channel_code: "usdt_trc20", channel_name: "USDT (TRC20)", provider_type: "usdt", config_data: null, is_enabled: false, sort_order: 5, created_at: "2025-01-01T00:00:00Z" },
 ]
 
 // ============================================================
@@ -459,39 +461,69 @@ export const mockPaymentChannels: PaymentChannelItem[] = [
 // ============================================================
 
 export const mockSiteConfig: SiteConfig = {
-  site_name: "Orion Key",
-  site_slogan: "Unlock Your AI Potential",
-  site_description: "ChatGPT / Claude / Midjourney 等 AI 账号与密钥，自动发货，安全可靠",
-  announcement: "新用户注册即送 100 积分！",
+  site_name: "FK Shop",
+  site_slogan: "数字商品自动发货",
+  site_description: "自助下单，自动交付，支持常见数字商品销售场景",
+  announcement: "欢迎使用 FK Shop",
   announcement_enabled: false,
-  popup_content: "春节特惠活动：全场商品 9 折优惠！",
+  popup_content: "请先完善站点设置、商品信息与支付渠道后再正式运营。",
   popup_enabled: false,
-  contact_email: "support@orionkey.com",
-  contact_telegram: "@orionkey",
-  contact_telegram_group: "https://t.me/+P3w53nfrAhpkMjFh",
+  contact_email_enabled: false,
+  contact_email: "",
+  contact_qq_enabled: false,
+  contact_qq: "",
+  contact_qq_group_enabled: false,
+  contact_qq_group: "",
+  contact_wechat_enabled: false,
+  contact_wechat: "",
+  contact_wechat_group_enabled: false,
+  contact_wechat_group: "",
+  contact_telegram_enabled: false,
+  contact_telegram: "",
+  contact_telegram_group_enabled: false,
+  contact_telegram_group: "",
+  contact_whatsapp_enabled: false,
+  contact_whatsapp: "",
+  contact_x_enabled: false,
+  contact_x: "",
   maintenance_enabled: false,
   points_enabled: true,
   points_rate: 100,
-  footer_text: "Orion Key - 自动发卡平台",
-  github_url: "https://github.com/orion-key/orion-key",
+  footer_text: "FK Shop",
+  github_url: "",
 }
 
 export const mockSiteConfigKVs: SiteConfigKV[] = [
-  { config_key: "site_name", config_value: "Orion Key", config_group: "basic" },
-  { config_key: "site_slogan", config_value: "Unlock Your AI Potential", config_group: "basic" },
-  { config_key: "site_description", config_value: "ChatGPT / Claude / Midjourney 等 AI 账号与密钥，自动发货，安全可靠", config_group: "basic" },
+  { config_key: "site_name", config_value: "FK Shop", config_group: "basic" },
+  { config_key: "site_slogan", config_value: "数字商品自动发货", config_group: "basic" },
+  { config_key: "site_description", config_value: "自助下单，自动交付，支持常见数字商品销售场景", config_group: "basic" },
   { config_key: "announcement_enabled", config_value: "false", config_group: "announcement" },
-  { config_key: "announcement", config_value: "新用户注册即送 100 积分！", config_group: "announcement" },
+  { config_key: "announcement", config_value: "欢迎使用 FK Shop", config_group: "announcement" },
   { config_key: "popup_enabled", config_value: "false", config_group: "popup" },
-  { config_key: "popup_content", config_value: "春节特惠活动：全场商品 9 折优惠！", config_group: "popup" },
-  { config_key: "contact_email", config_value: "support@orionkey.com", config_group: "contact" },
-  { config_key: "contact_telegram", config_value: "@orionkey", config_group: "contact" },
-  { config_key: "contact_telegram_group", config_value: "https://t.me/+P3w53nfrAhpkMjFh", config_group: "contact" },
+  { config_key: "popup_content", config_value: "请先完善站点设置、商品信息与支付渠道后再正式运营。", config_group: "popup" },
+  { config_key: "contact_email_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_email", config_value: "", config_group: "contact" },
+  { config_key: "contact_qq_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_qq", config_value: "", config_group: "contact" },
+  { config_key: "contact_qq_group_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_qq_group", config_value: "", config_group: "contact" },
+  { config_key: "contact_wechat_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_wechat", config_value: "", config_group: "contact" },
+  { config_key: "contact_wechat_group_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_wechat_group", config_value: "", config_group: "contact" },
+  { config_key: "contact_telegram_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_telegram", config_value: "", config_group: "contact" },
+  { config_key: "contact_telegram_group_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_telegram_group", config_value: "", config_group: "contact" },
+  { config_key: "contact_whatsapp_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_whatsapp", config_value: "", config_group: "contact" },
+  { config_key: "contact_x_enabled", config_value: "false", config_group: "contact" },
+  { config_key: "contact_x", config_value: "", config_group: "contact" },
   { config_key: "maintenance_enabled", config_value: "false", config_group: "maintenance" },
   { config_key: "points_enabled", config_value: "true", config_group: "points" },
   { config_key: "points_rate", config_value: "100", config_group: "points" },
-  { config_key: "footer_text", config_value: "Orion Key - 自动发卡平台", config_group: "basic" },
-  { config_key: "github_url", config_value: "https://github.com/orion-key/orion-key", config_group: "basic" },
+  { config_key: "footer_text", config_value: "FK Shop", config_group: "basic" },
+  { config_key: "github_url", config_value: "", config_group: "basic" },
 ]
 
 // ============================================================
@@ -552,7 +584,7 @@ export const mockUser: UserProfile = {
 export const mockAdminUser: UserProfile = {
   id: uuid(901),
   username: "admin",
-  email: "admin@orionkey.com",
+  email: "admin@fk.jixianxiake.xyz",
   role: "ADMIN",
   points: 0,
   created_at: "2025-01-01T00:00:00Z",
@@ -623,7 +655,7 @@ export function mockPointsData(params?: { page?: number; page_size?: number }): 
   }
 }
 
-export function mockQueryOrders(params: { order_ids?: string[]; emails?: string[] }): OrderBrief[] {
+export function mockQueryOrders(params: { order_ids?: string[]; emails?: string[]; contact_values?: string[] }): OrderBrief[] {
   let results = [...mockOrderBriefs]
   if (params.order_ids?.length) {
     results = results.filter(o => params.order_ids!.includes(o.id))
@@ -661,6 +693,7 @@ export function mockCreateOrder(email: string, paymentMethod: string): CreateOrd
     id: orderId,
     total_amount: 48.5,
     actual_amount: 48.5,
+    currency: "CNY",
     status: "PENDING",
     order_type: "DIRECT",
     payment_method: paymentMethod,
@@ -675,11 +708,13 @@ export function mockCreateOrder(email: string, paymentMethod: string): CreateOrd
       { id: uuid(Date.now() % 10000 + 1), product_id: uuid(11), product_title: "Steam 50元钱包充值卡", spec_name: "50元面额", unit_price: 48.5, quantity: 1, subtotal: 48.5 },
     ],
   }
-  const payment: PaymentCreateResult = {
-    order_id: orderId,
-    payment_url: "https://mock-payment.example.com/pay/" + orderId,
-    expires_at: expiresAt,
-  }
+    const payment: PaymentCreateResult = {
+      order_id: orderId,
+      payment_url: "https://mock-payment.example.com/pay/" + orderId,
+      expires_at: expiresAt,
+      amount: 48.5,
+      currency: "CNY",
+    }
   return { order, payment }
 }
 

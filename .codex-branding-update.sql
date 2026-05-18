@@ -1,0 +1,23 @@
+
+UPDATE users SET email = 'admin@fk.jixianxiake.xyz' WHERE username = 'admin';
+UPDATE site_configs SET config_value = 'FK Shop' WHERE config_key = 'site_name';
+UPDATE site_configs SET config_value = '数字商品自动发货' WHERE config_key = 'site_slogan';
+UPDATE site_configs SET config_value = '自助下单，自动交付，支持常见数字商品销售场景' WHERE config_key = 'site_description';
+UPDATE site_configs SET config_value = 'FK Shop' WHERE config_key = 'footer_text';
+UPDATE site_configs SET config_value = '' WHERE config_key IN ('github_url', 'contact_email', 'contact_telegram', 'contact_telegram_group', 'logo_url', 'favicon_url');
+UPDATE site_configs SET config_value = '欢迎使用 FK Shop' WHERE config_key = 'announcement' AND config_value LIKE '%注册即送%';
+UPDATE site_configs SET config_value = '请先完善站点设置、商品信息与支付渠道后再正式运营。' WHERE config_key = 'popup_content' AND config_value LIKE '%春节特惠%';
+UPDATE product_categories SET name = '数字点卡' WHERE id = 'a0000000-0000-0000-0000-000000000001';
+UPDATE product_categories SET name = '软件服务' WHERE id = 'a0000000-0000-0000-0000-000000000002';
+UPDATE products SET title = '通用点卡 50 面值', description = '示例数字点卡，购买后自动发货，可用于测试下单、支付与发货流程。' WHERE id = 'b0000000-0000-0000-0000-000000000001';
+UPDATE products SET title = '通用点卡 100 面值', description = '示例数字点卡，适合演示不同面值与多商品库存管理。' WHERE id = 'b0000000-0000-0000-0000-000000000002';
+UPDATE products SET title = '专业版软件授权码', description = '示例软件授权商品，适合测试规格、库存和自动交付能力。' WHERE id = 'b0000000-0000-0000-0000-000000000003';
+UPDATE products SET title = '办公套件年度订阅', description = '示例办公服务商品，适合展示订阅型数字商品的售卖流程。' WHERE id = 'b0000000-0000-0000-0000-000000000004';
+UPDATE products SET title = '影音会员月卡', description = '示例影音订阅商品，可用于测试会员类商品购买与发货。' WHERE id = 'b0000000-0000-0000-0000-000000000005';
+UPDATE products SET title = '音乐会员季卡', description = '示例音乐订阅商品，适合测试周期型服务商品的运营配置。' WHERE id = 'b0000000-0000-0000-0000-000000000006';
+UPDATE card_keys SET content = regexp_replace(content, '^STEAM50-TEST-', 'CARD50-TEST-') WHERE product_id = 'b0000000-0000-0000-0000-000000000001' AND content LIKE 'STEAM50-TEST-%';
+UPDATE card_keys SET content = regexp_replace(content, '^STEAM100-TEST-', 'CARD100-TEST-') WHERE product_id = 'b0000000-0000-0000-0000-000000000002' AND content LIKE 'STEAM100-TEST-%';
+UPDATE card_keys SET content = regexp_replace(content, '^WIN11PRO-TEST-', 'LICENSE-PRO-TEST-') WHERE product_id = 'b0000000-0000-0000-0000-000000000003' AND content LIKE 'WIN11PRO-TEST-%';
+UPDATE card_keys SET content = regexp_replace(content, '^OFFICE365-TEST-', 'OFFICE-SUITE-TEST-') WHERE product_id = 'b0000000-0000-0000-0000-000000000004' AND content LIKE 'OFFICE365-TEST-%';
+UPDATE card_keys SET content = regexp_replace(content, '^NETFLIX-TEST-', 'VIDEO-MEMBER-TEST-') WHERE product_id = 'b0000000-0000-0000-0000-000000000005' AND content LIKE 'NETFLIX-TEST-%';
+UPDATE card_keys SET content = regexp_replace(content, '^SPOTIFY-TEST-', 'MUSIC-MEMBER-TEST-') WHERE product_id = 'b0000000-0000-0000-0000-000000000006' AND content LIKE 'SPOTIFY-TEST-%';

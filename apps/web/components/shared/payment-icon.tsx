@@ -19,6 +19,8 @@ function getLogoSrc(method: string): string | null {
   if (m.includes("alipay") || m === "支付宝") return "/images/payment/ali.svg"
   if (m.includes("wechat") || m === "微信支付") return "/images/payment/wechat.svg"
   if (m.includes("usdt")) return "/images/payment/usdt.svg"
+  if (m.includes("stripe")) return "/images/payment/stripe.svg"
+  if (m.includes("paypal")) return "/images/payment/paypal.svg"
   return null
 }
 
@@ -29,6 +31,8 @@ const BRAND_COLORS: Record<string, string> = {
   usdt: "#26A17B",
   usdt_trc20: "#26A17B",
   usdt_bsc: "#26A17B",
+  stripe: "#635BFF",
+  paypal: "#0070BA",
 }
 
 export function getPaymentBrandColor(method: string): string | undefined {
@@ -43,6 +47,8 @@ const PAYMENT_LABELS: Record<string, string> = {
   usdt_erc20: "USDT (ERC-20)",
   usdt_bep20: "USDT (BEP-20)",
   usdt_bsc: "USDT (BSC)",
+  stripe: "Stripe",
+  paypal: "PayPal",
 }
 
 /** 获取支付方式显示名称（优先 i18n t() 翻译，无翻译时回退到内置映射；大小写不敏感） */
@@ -52,6 +58,8 @@ export function getPaymentLabel(method: string, t?: (key: any) => string): strin
   if (t) {
     if (m === "alipay") return t("payment.alipay")
     if (m === "wechat") return t("payment.wechat")
+    if (m === "stripe") return t("payment.stripe")
+    if (m === "paypal") return t("payment.paypal")
   }
   return PAYMENT_LABELS[m] || method
 }
@@ -62,6 +70,8 @@ export function getPaymentScanHint(method: string, t: (key: any) => string): str
   const m = normalize(method)
   if (m === "alipay") return t("payment.scanWithAlipay")
   if (m === "wechat") return t("payment.scanWithWechat")
+  if (m === "stripe") return t("payment.redirectWithStripe")
+  if (m === "paypal") return t("payment.redirectWithPaypal")
   return t("payment.scanToPay")
 }
 

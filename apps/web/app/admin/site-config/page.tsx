@@ -23,6 +23,15 @@ function validateImageFile(file: File): string | null {
 }
 
 type TabKey = "basic" | "announcement" | "points" | "contact" | "maintenance"
+type ContactField = {
+  key: string
+  enabledKey: string
+  label: string
+  enabledLabel: string
+  type: "text" | "email"
+  placeholder: string
+  hint?: string
+}
 
 export default function AdminSiteConfigPage() {
   const { t } = useLocale()
@@ -63,6 +72,81 @@ export default function AdminSiteConfigPage() {
   const toggleBool = (key: string) => {
     setConfigMap(prev => ({ ...prev, [key]: prev[key] === "true" ? "false" : "true" }))
   }
+  const contactFields: ContactField[] = [
+    {
+      key: "contact_email",
+      enabledKey: "contact_email_enabled",
+      label: t("admin.contactEmail"),
+      enabledLabel: t("admin.contactEmailEnabled"),
+      type: "email",
+      placeholder: "support@example.com",
+    },
+    {
+      key: "contact_qq",
+      enabledKey: "contact_qq_enabled",
+      label: t("admin.contactQQ"),
+      enabledLabel: t("admin.contactQQEnabled"),
+      type: "text",
+      placeholder: "123456789",
+    },
+    {
+      key: "contact_qq_group",
+      enabledKey: "contact_qq_group_enabled",
+      label: t("admin.contactQQGroup"),
+      enabledLabel: t("admin.contactQQGroupEnabled"),
+      type: "text",
+      placeholder: "群号或加群链接",
+    },
+    {
+      key: "contact_wechat",
+      enabledKey: "contact_wechat_enabled",
+      label: t("admin.contactWechat"),
+      enabledLabel: t("admin.contactWechatEnabled"),
+      type: "text",
+      placeholder: "wechat_id",
+    },
+    {
+      key: "contact_wechat_group",
+      enabledKey: "contact_wechat_group_enabled",
+      label: t("admin.contactWechatGroup"),
+      enabledLabel: t("admin.contactWechatGroupEnabled"),
+      type: "text",
+      placeholder: "群备注、群号或引导文案",
+    },
+    {
+      key: "contact_telegram",
+      enabledKey: "contact_telegram_enabled",
+      label: t("admin.contactTelegram"),
+      enabledLabel: t("admin.contactTelegramEnabled"),
+      type: "text",
+      placeholder: "@telegram_support 或 https://t.me/...",
+    },
+    {
+      key: "contact_telegram_group",
+      enabledKey: "contact_telegram_group_enabled",
+      label: t("admin.contactTelegramGroup"),
+      enabledLabel: t("admin.contactTelegramGroupEnabled"),
+      type: "text",
+      placeholder: "https://t.me/...",
+      hint: t("admin.contactTelegramGroupHint"),
+    },
+    {
+      key: "contact_whatsapp",
+      enabledKey: "contact_whatsapp_enabled",
+      label: t("admin.contactWhatsapp"),
+      enabledLabel: t("admin.contactWhatsappEnabled"),
+      type: "text",
+      placeholder: "+8613812345678 或 https://wa.me/...",
+    },
+    {
+      key: "contact_x",
+      enabledKey: "contact_x_enabled",
+      label: t("admin.contactX"),
+      enabledLabel: t("admin.contactXEnabled"),
+      type: "text",
+      placeholder: "@account 或 https://x.com/...",
+    },
+  ]
 
   const handleSave = async () => {
     setSaving(true)
@@ -162,7 +246,7 @@ export default function AdminSiteConfigPage() {
                 className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 value={getValue("site_slogan")}
                 onChange={(e) => setValue("site_slogan", e.target.value)}
-                placeholder="Unlock Your AI Potential"
+                placeholder="数字商品自动发货"
               />
               <p className="text-xs text-muted-foreground">{t("admin.siteSloganHint")}</p>
             </div>
@@ -411,35 +495,38 @@ export default function AdminSiteConfigPage() {
       {tab === "contact" && (
         <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
           <div className="flex flex-col gap-5 max-w-xl">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-foreground">{t("admin.contactEmail")}</label>
-              <input
-                type="email"
-                className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                value={getValue("contact_email")}
-                onChange={(e) => setValue("contact_email", e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-foreground">{t("admin.contactTelegram")}</label>
-              <input
-                type="text"
-                className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                value={getValue("contact_telegram")}
-                onChange={(e) => setValue("contact_telegram", e.target.value)}
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-foreground">{t("admin.contactTelegramGroup")}</label>
-              <input
-                type="text"
-                className="h-10 rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="https://t.me/..."
-                value={getValue("contact_telegram_group")}
-                onChange={(e) => setValue("contact_telegram_group", e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">{t("admin.contactTelegramGroupHint")}</p>
-            </div>
+            {contactFields.map((field) => (
+              <div key={field.key} className="rounded-lg border border-border/70 bg-background/60 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <label className="text-sm font-medium text-foreground">{field.label}</label>
+                  <button
+                    type="button"
+                    className={cn(
+                      "relative h-6 w-11 rounded-full transition-colors",
+                      getBool(field.enabledKey) ? "bg-primary" : "bg-muted"
+                    )}
+                    onClick={() => toggleBool(field.enabledKey)}
+                    aria-label={field.enabledLabel}
+                    title={field.enabledLabel}
+                  >
+                    <span className={cn(
+                      "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
+                      getBool(field.enabledKey) && "translate-x-5"
+                    )} />
+                  </button>
+                </div>
+                <input
+                  type={field.type}
+                  className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  placeholder={field.placeholder}
+                  value={getValue(field.key)}
+                  onChange={(e) => setValue(field.key, e.target.value)}
+                />
+                {field.hint && (
+                  <p className="mt-2 text-xs text-muted-foreground">{field.hint}</p>
+                )}
+              </div>
+            ))}
             <button
               type="button"
               className="flex w-fit items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"

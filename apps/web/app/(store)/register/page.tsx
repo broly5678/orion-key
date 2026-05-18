@@ -168,7 +168,7 @@ export default function RegisterPage() {
                   value={form.captcha}
                   onChange={(e) => update("captcha", e.target.value.toUpperCase())}
                   maxLength={6}
-                  placeholder="请输入验证码"
+                  placeholder={t("auth.verifyCodePlaceholder")}
                   className="h-10 flex-1 rounded-lg border border-input bg-background px-3 text-sm uppercase text-foreground tracking-wider focus:outline-none focus:ring-2 focus:ring-ring"
                   required
                 />
